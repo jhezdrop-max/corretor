@@ -1,0 +1,8 @@
+# Local secrets and environment files
+.env
+.env.*
+js/config.local.js
+
+# OS/editor
+.DS_Store
+.vscode/
