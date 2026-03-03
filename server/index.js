@@ -415,6 +415,7 @@ function isTriboPayConfig(cfg) {
 
 function unwrapProviderData(providerData) {
   if (!providerData || typeof providerData !== "object") return {};
+  if (providerData.response && typeof providerData.response === "object") return providerData.response;
   if (providerData.data && typeof providerData.data === "object") return providerData.data;
   if (providerData.transaction && typeof providerData.transaction === "object") return providerData.transaction;
   return providerData;
@@ -431,8 +432,20 @@ function pickString(...values) {
 
 function normalizeCreateResponse(providerData, requestedAmount, cfg) {
   const source = unwrapProviderData(providerData);
+  const sourcePix = unwrapProviderData(source.pix || {});
+  const sourcePayment = unwrapProviderData(source.payment || {});
+  const sourceCheckout = unwrapProviderData(source.checkout || {});
+  const sourceLinks = unwrapProviderData(source.links || {});
   const tribo = isTriboPayConfig(cfg);
-  const txid = pickString(source.txid, source.id, source.chargeId, source.code);
+  const txid = pickString(
+    source.txid,
+    source.id,
+    source.chargeId,
+    source.code,
+    source.transaction_id,
+    sourcePayment.id,
+    sourceCheckout.id,
+  );
   const triboHash = pickString(source.transaction_hash, source.hash, source.id, source.reference);
   const resolvedTxid = tribo ? triboHash : txid;
 
@@ -442,11 +455,22 @@ function normalizeCreateResponse(providerData, requestedAmount, cfg) {
     source.emv,
     source.pix_code,
     source.brcode,
+    source.copiaecola,
+    source.pix_copy_paste,
+    source.pix_payload,
     source.copy_paste,
     source.pix_emv,
+    source.pix?.copyPaste,
     source.pix?.code,
     source.pix?.copy_paste,
     source.pix?.brcode,
+    sourcePix.copyPaste,
+    sourcePix.code,
+    sourcePix.copy_paste,
+    sourcePix.brcode,
+    sourcePix.emv,
+    sourcePayment.pix_code,
+    sourcePayment.copy_paste,
   );
 
   const qrCodeBase64 = pickString(
@@ -454,18 +478,39 @@ function normalizeCreateResponse(providerData, requestedAmount, cfg) {
     source.qrCodeImage,
     source.qrcode,
     source.qr_code,
+    source.qr_code_base64,
+    source.pix_qr_code,
+    source.pix_qrcode_base64,
     source.pix?.qrcode,
     source.pix?.qr_code_base64,
     source.pix?.qr_code,
     source.pix_qrcode,
+    sourcePix.qrcode,
+    sourcePix.qr_code,
+    sourcePix.qr_code_base64,
+    sourcePix.qrCodeBase64,
+    sourcePayment.qr_code,
+    sourcePayment.qr_code_base64,
   );
 
   const paymentUrl = pickString(
     source.payment_url,
     source.checkout_url,
+    source.checkoutUrl,
+    source.payment_link,
+    source.transaction_url,
+    source.redirect_url,
+    source.link,
     source.url,
     source.ticket_url,
     source.pix?.url,
+    sourcePix.url,
+    sourcePayment.url,
+    sourcePayment.payment_url,
+    sourceCheckout.url,
+    sourceCheckout.checkout_url,
+    sourceLinks.checkout,
+    sourceLinks.payment,
   );
 
   const status = tribo ? mapPixStatus(source.status) : source.status || "PENDING";
