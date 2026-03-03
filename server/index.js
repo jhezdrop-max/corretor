@@ -529,7 +529,7 @@ function normalizeCreateResponse(providerData, requestedAmount, cfg) {
     status,
     copyPaste,
     qrCodeBase64,
-    paymentUrl,
+    paymentUrl: paymentUrl || (tribo ? `https://go.tribopay.com.br/${encodeURIComponent(String(resolvedTxid))}` : ""),
     createdAt: now(),
     expiresAt: typeof expiresAt === "number" ? expiresAt : new Date(expiresAt).getTime(),
   };
