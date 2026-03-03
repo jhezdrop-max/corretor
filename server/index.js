@@ -558,6 +558,103 @@ function normalizeStatusResponse(providerData, txid) {
   };
 }
 
+function fillPixPresentationFromProvider(charge, providerData, cfg) {
+  if (!charge || !providerData) return charge;
+  const source = unwrapProviderData(providerData);
+  const sourcePix = unwrapProviderData(source.pix || {});
+  const sourcePayment = unwrapProviderData(source.payment || {});
+  const sourceCheckout = unwrapProviderData(source.checkout || {});
+  const sourceLinks = unwrapProviderData(source.links || {});
+  const tribo = isTriboPayConfig(cfg);
+
+  const copyPaste = pickString(
+    source.copyPaste,
+    source.pixCopiaECola,
+    source.emv,
+    source.pix_code,
+    source.brcode,
+    source.copiaecola,
+    source.pix_copy_paste,
+    source.pix_payload,
+    source.copy_paste,
+    source.pix_emv,
+    source.pix?.copyPaste,
+    source.pix?.code,
+    source.pix?.copy_paste,
+    source.pix?.brcode,
+    sourcePix.copyPaste,
+    sourcePix.code,
+    sourcePix.copy_paste,
+    sourcePix.brcode,
+    sourcePix.emv,
+    sourcePayment.pix_code,
+    sourcePayment.copy_paste,
+  );
+
+  const qrCodeBase64 = pickString(
+    source.qrCodeBase64,
+    source.qrCodeImage,
+    source.qrcode,
+    source.qr_code,
+    source.qr_code_base64,
+    source.pix_qr_code,
+    source.pix_qrcode_base64,
+    source.pix?.qrcode,
+    source.pix?.qr_code_base64,
+    source.pix?.qr_code,
+    source.pix_qrcode,
+    sourcePix.qrcode,
+    sourcePix.qr_code,
+    sourcePix.qr_code_base64,
+    sourcePix.qrCodeBase64,
+    sourcePayment.qr_code,
+    sourcePayment.qr_code_base64,
+  );
+
+  const paymentUrl = pickString(
+    source.payment_url,
+    source.checkout_url,
+    source.checkoutUrl,
+    source.payment_link,
+    source.transaction_url,
+    source.redirect_url,
+    source.link,
+    source.url,
+    source.ticket_url,
+    source.pix?.url,
+    sourcePix.url,
+    sourcePayment.url,
+    sourcePayment.payment_url,
+    sourceCheckout.url,
+    sourceCheckout.checkout_url,
+    sourceLinks.checkout,
+    sourceLinks.payment,
+  );
+
+  const fallbackOfferHash = pickString(
+    source.offer_hash,
+    source.offerHash,
+    source.offer?.hash,
+    cfg.offerHash,
+  );
+
+  if (!charge.copyPaste && copyPaste) charge.copyPaste = copyPaste;
+  if (!charge.qrCodeBase64 && qrCodeBase64) charge.qrCodeBase64 = qrCodeBase64;
+  if (!charge.paymentUrl) {
+    charge.paymentUrl =
+      paymentUrl ||
+      (tribo
+        ? `https://go.tribopay.com.br/${encodeURIComponent(String(fallbackOfferHash || charge.txid))}`
+        : "");
+  }
+
+  const rawStatus = pickString(source.status, source.pixStatus, source.payment_status);
+  if (rawStatus) {
+    charge.status = mapPixStatus(rawStatus);
+  }
+  return charge;
+}
+
 function readProviderErrorMessage(details) {
   const source = unwrapProviderData(details);
   return pickString(
@@ -1550,6 +1647,17 @@ async function handleApi(req, res, pathname) {
 
         const providerData = await callPixProvider(cfg.createPath, "POST", payload);
         normalized = normalizeCreateResponse(providerData, amount, cfg);
+
+        if ((!normalized.copyPaste || !normalized.qrCodeBase64) && cfg.statusPathTemplate) {
+          try {
+            const statusPath = cfg.statusPathTemplate.replace("{txid}", encodeURIComponent(normalized.txid));
+            const detailData = await callPixProvider(statusPath, "GET");
+            normalized = fillPixPresentationFromProvider(normalized, detailData, cfg);
+            runtimeChargeStatus.set(normalized.txid, normalized);
+          } catch {
+            // fallback silencioso: mantém dados já retornados no create
+          }
+        }
       }
 
       pixChargeOwners.set(normalized.txid, clientUser.id);
