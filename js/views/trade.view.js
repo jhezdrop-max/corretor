@@ -9,6 +9,7 @@ import { updateHeaderBalance } from "../components/header.js";
 const MARKET_TICK_MS = 1000;
 const DEFAULT_HISTORY_WINDOW = "1d";
 const DEFAULT_CANDLE_INTERVAL = APP_CONFIG.defaultCandleInterval || "15m";
+const MIN_TRADE_AMOUNT = 2;
 const ZOOM_FACTORS = [1, 1.4, 2, 2.8, 3.8];
 const DEFAULT_ZOOM_INDEX = 2;
 const TIP_WOBBLE_RATIO = 0.0009;
@@ -298,7 +299,7 @@ export async function renderTradeView(container) {
             </div>
             <div class="field">
               <label for="trade-amount">Valor da ordem (R$)</label>
-              <input class="input" id="trade-amount" type="number" min="10" step="0.01" required />
+              <input class="input" id="trade-amount" type="number" min="${MIN_TRADE_AMOUNT}" step="0.01" required />
             </div>
             <div class="field">
               <label for="trade-expiry">Expiracao</label>
@@ -614,8 +615,8 @@ export async function renderTradeView(container) {
     const amount = Number(container.querySelector("#trade-amount").value);
     const expirySeconds = Number(container.querySelector("#trade-expiry").value);
 
-    if (!amount || amount < 10) {
-      showMessage("Valor minimo da ordem: R$ 10,00.");
+    if (!amount || amount < MIN_TRADE_AMOUNT) {
+      showMessage("Valor minimo da ordem: R$ 2,00.");
       return;
     }
 
