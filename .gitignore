@@ -2,6 +2,9 @@
 .env
 .env.*
 js/config.local.js
+backups/
+backup-byetrader-*.tar.gz
+env-backup-*.txt
 
 # OS/editor
 .DS_Store

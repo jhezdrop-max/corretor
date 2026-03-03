@@ -1621,9 +1621,39 @@ function resolveFilePath(pathname) {
   return filePath;
 }
 
+function isSensitivePath(pathname, filePath) {
+  const normalizedPath = String(pathname || "");
+  const segments = normalizedPath.split("/").filter(Boolean);
+  if (segments.some((segment) => segment.startsWith("."))) return true;
+  if (segments[0] === "backups") return true;
+
+  const baseName = path.basename(filePath).toLowerCase();
+  if (
+    baseName === ".env" ||
+    baseName.startsWith(".env.") ||
+    baseName === ".gitignore" ||
+    baseName.startsWith("env-backup-") ||
+    baseName.startsWith("backup-byetrader-")
+  ) {
+    return true;
+  }
+
+  if (/(\.pem|\.key|\.p12|\.pfx|\.sql|\.sqlite|\.db|\.tar|\.gz|\.zip)$/i.test(baseName)) {
+    return true;
+  }
+
+  return false;
+}
+
 async function serveStatic(req, res, pathname) {
   const filePath = resolveFilePath(pathname);
   if (!filePath) {
+    res.writeHead(403);
+    res.end("Forbidden");
+    return;
+  }
+
+  if (isSensitivePath(pathname, filePath)) {
     res.writeHead(403);
     res.end("Forbidden");
     return;
