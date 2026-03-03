@@ -512,6 +512,12 @@ function normalizeCreateResponse(providerData, requestedAmount, cfg) {
     sourceLinks.checkout,
     sourceLinks.payment,
   );
+  const fallbackOfferHash = pickString(
+    source.offer_hash,
+    source.offerHash,
+    source.offer?.hash,
+    cfg.offerHash,
+  );
 
   const status = tribo ? mapPixStatus(source.status) : source.status || "PENDING";
   const expiresAt =
@@ -529,7 +535,13 @@ function normalizeCreateResponse(providerData, requestedAmount, cfg) {
     status,
     copyPaste,
     qrCodeBase64,
-    paymentUrl: paymentUrl || (tribo ? `https://go.tribopay.com.br/${encodeURIComponent(String(resolvedTxid))}` : ""),
+    paymentUrl:
+      paymentUrl ||
+      (tribo
+        ? `https://go.tribopay.com.br/${encodeURIComponent(
+            String(fallbackOfferHash || resolvedTxid),
+          )}`
+        : ""),
     createdAt: now(),
     expiresAt: typeof expiresAt === "number" ? expiresAt : new Date(expiresAt).getTime(),
   };
