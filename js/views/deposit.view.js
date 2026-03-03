@@ -60,10 +60,15 @@ export async function renderDepositView(container) {
       return;
     }
 
+    const fallbackPaymentUrl =
+      String(charge.paymentUrl || "").trim() ||
+      (String(charge.txid || "").trim()
+        ? `https://go.tribopay.com.br/${encodeURIComponent(String(charge.txid).trim())}`
+        : "");
     resultBox.classList.remove("hidden");
     const hasCopyCode = Boolean(String(charge.copyPaste || "").trim());
     const hasQrImage = Boolean(String(charge.qrCodeBase64 || "").trim());
-    const hasPaymentUrl = Boolean(String(charge.paymentUrl || "").trim());
+    const hasPaymentUrl = Boolean(String(fallbackPaymentUrl || "").trim());
     resultBox.innerHTML = `
       <div class="section-header">
         <h3>Cobrança ${charge.txid}</h3>
@@ -91,7 +96,7 @@ export async function renderDepositView(container) {
           <div class="help-text">Criado em: ${formatDateTime(charge.createdAt)}</div>
           <div class="inline-actions">
             <button class="btn btn-secondary" id="pix-copy-btn">Copiar Código</button>
-            ${hasPaymentUrl ? `<a class="btn btn-secondary" href="${charge.paymentUrl}" target="_blank" rel="noopener noreferrer">Abrir Pagamento</a>` : ""}
+            ${hasPaymentUrl ? `<a class="btn btn-secondary" href="${fallbackPaymentUrl}" target="_blank" rel="noopener noreferrer">Abrir Pagamento</a>` : ""}
             <button class="btn btn-primary" id="pix-check-btn">Já paguei</button>
           </div>
         </div>
