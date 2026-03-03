@@ -200,6 +200,68 @@ function listUserTransactions(userId) {
   return db.transactions.filter((item) => item.userId === userId);
 }
 
+function findOwnerByTxid(txid) {
+  const directOwner = pixChargeOwners.get(txid);
+  if (directOwner) return directOwner;
+
+  for (const [userId, charges] of Object.entries(db.pixCharges || {})) {
+    if ((charges || []).some((item) => item.txid === txid)) {
+      return userId;
+    }
+  }
+  return "";
+}
+
+function ensureDbCharge(ownerId, txid, amountHint = 0) {
+  if (!db.pixCharges[ownerId]) db.pixCharges[ownerId] = [];
+  let charge = db.pixCharges[ownerId].find((item) => item.txid === txid);
+  if (!charge) {
+    const runtime = runtimeChargeStatus.get(txid) || {};
+    charge = {
+      txid,
+      amount: Number(runtime.amount || amountHint || 0),
+      status: String(runtime.status || "PENDING"),
+      createdAt: Number(runtime.createdAt || now()),
+      expiresAt: Number(runtime.expiresAt || now() + 10 * 60 * 1000),
+      copyPaste: runtime.copyPaste || "",
+      qrCodeBase64: runtime.qrCodeBase64 || "",
+      credited: false,
+    };
+    db.pixCharges[ownerId].unshift(charge);
+  }
+  return charge;
+}
+
+function creditPaidChargeByTxid(txid, amountHint = 0) {
+  const ownerId = findOwnerByTxid(txid);
+  if (!ownerId) return false;
+
+  const wallet = ensureWallet(ownerId);
+  const charge = ensureDbCharge(ownerId, txid, amountHint);
+  charge.status = "PAID";
+
+  if (charge.credited) return true;
+
+  const amount = Number(charge.amount || amountHint || 0);
+  if (!Number.isFinite(amount) || amount <= 0) return false;
+
+  wallet.available = formatMoney(Number(wallet.available || 0) + amount);
+  charge.credited = true;
+  charge.amount = amount;
+
+  recordTransaction(ownerId, {
+    category: "deposit",
+    eventType: "DEPOSIT_CREDITED",
+    status: "CONFIRMED",
+    amount,
+    balanceAfter: wallet.available,
+    referenceId: txid,
+    description: "Depósito Pix confirmado (auto via status/webhook)",
+    createdAt: now(),
+  });
+  return true;
+}
+
 function createAuthToken(userId) {
   const token = `srv-${randomId()}`;
   authSessions.set(token, {
@@ -1735,6 +1797,9 @@ async function handleApi(req, res, pathname) {
       const providerData = await callPixProvider(statusPath, "GET");
       const normalized = normalizeStatusResponse(providerData, txid);
       runtimeChargeStatus.set(txid, { ...(cached || {}), ...normalized, updatedAt: now() });
+      if (normalized.status === "PAID") {
+        creditPaidChargeByTxid(txid, Number(cached?.amount || 0));
+      }
       sendJson(res, 200, normalized);
     } catch (error) {
       const status = error.statusCode && Number.isInteger(error.statusCode) ? error.statusCode : 500;
@@ -1767,6 +1832,9 @@ async function handleApi(req, res, pathname) {
         paidAt: body.paid_at || null,
         updatedAt: now(),
       });
+      if (status === "PAID") {
+        creditPaidChargeByTxid(txid, amount);
+      }
 
       sendJson(res, 200, { ok: true });
     } catch {
