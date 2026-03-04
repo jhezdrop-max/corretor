@@ -1,5 +1,6 @@
 const BASE_ITEMS = [
   { route: "/dashboard", label: "Dashboard" },
+  { route: "/awards", label: "Premiações" },
   { route: "/deposit", label: "Depósito Pix" },
   { route: "/trade", label: "Operações" },
   { route: "/account", label: "Conta & Saques" },

@@ -8,6 +8,7 @@ import { clearSession, getSession } from "./store.js";
 import { renderAuthView } from "./views/auth.view.js";
 import { renderAccountView } from "./views/account.view.js";
 import { renderAdminView } from "./views/admin.view.js";
+import { renderAwardsView } from "./views/awards.view.js";
 import { renderDashboardView } from "./views/dashboard.view.js";
 import { renderDepositView } from "./views/deposit.view.js";
 import { renderTradeView } from "./views/trade.view.js";
@@ -30,7 +31,7 @@ function cleanupCurrentView() {
 }
 
 function protectedRoute(route) {
-  return route === "/dashboard" || route === "/deposit" || route === "/trade" || route === "/account" || route === "/admin";
+  return route === "/dashboard" || route === "/awards" || route === "/deposit" || route === "/trade" || route === "/account" || route === "/admin";
 }
 
 async function renderRoute(route) {
@@ -94,6 +95,11 @@ async function renderRoute(route) {
 
   if (route === "/dashboard") {
     currentCleanup = await renderDashboardView(content, { navigate });
+    return;
+  }
+
+  if (route === "/awards") {
+    currentCleanup = await renderAwardsView(content, { navigate });
     return;
   }
 
