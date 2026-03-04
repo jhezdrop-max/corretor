@@ -492,6 +492,89 @@ function pickString(...values) {
   return "";
 }
 
+function walkObjectStrings(input, visitor, visited = new Set()) {
+  if (!input || typeof input !== "object") return;
+  if (visited.has(input)) return;
+  visited.add(input);
+
+  if (Array.isArray(input)) {
+    for (const item of input) walkObjectStrings(item, visitor, visited);
+    return;
+  }
+
+  for (const [key, value] of Object.entries(input)) {
+    if (typeof value === "string") visitor(key, value);
+    else if (value && typeof value === "object") walkObjectStrings(value, visitor, visited);
+  }
+}
+
+function findPixCodeDeep(input) {
+  let found = "";
+  walkObjectStrings(input, (key, value) => {
+    if (found) return;
+    const normalizedKey = String(key || "").toLowerCase();
+    const trimmed = String(value || "").trim();
+    if (!trimmed) return;
+
+    const looksLikePixEmv = trimmed.startsWith("000201") && trimmed.length > 40;
+    const pixNamedField =
+      normalizedKey.includes("pix_code") ||
+      normalizedKey.includes("copy_paste") ||
+      normalizedKey.includes("copia") ||
+      normalizedKey.includes("brcode") ||
+      normalizedKey.includes("emv");
+
+    if (looksLikePixEmv || (pixNamedField && trimmed.length > 20)) {
+      found = trimmed;
+    }
+  });
+  return found;
+}
+
+function findQrCodeDeep(input) {
+  let found = "";
+  walkObjectStrings(input, (key, value) => {
+    if (found) return;
+    const normalizedKey = String(key || "").toLowerCase();
+    const trimmed = String(value || "").trim();
+    if (!trimmed) return;
+
+    const isDataImage = trimmed.startsWith("data:image/");
+    const isQrNamedField =
+      normalizedKey.includes("qrcode") ||
+      normalizedKey.includes("qr_code") ||
+      normalizedKey.includes("qrimage");
+
+    if (isDataImage || (isQrNamedField && trimmed.length > 80)) {
+      found = trimmed;
+    }
+  });
+  return found;
+}
+
+function findPaymentUrlDeep(input) {
+  let found = "";
+  walkObjectStrings(input, (key, value) => {
+    if (found) return;
+    const normalizedKey = String(key || "").toLowerCase();
+    const trimmed = String(value || "").trim();
+    if (!trimmed) return;
+    if (!/^https?:\/\//i.test(trimmed)) return;
+
+    const likelyCheckoutUrl =
+      normalizedKey.includes("checkout") ||
+      normalizedKey.includes("payment") ||
+      normalizedKey.includes("ticket") ||
+      normalizedKey.includes("redirect") ||
+      normalizedKey.includes("url");
+
+    if (likelyCheckoutUrl) {
+      found = trimmed;
+    }
+  });
+  return found;
+}
+
 function normalizeCreateResponse(providerData, requestedAmount, cfg) {
   const source = unwrapProviderData(providerData);
   const sourcePix = unwrapProviderData(source.pix || {});
@@ -533,6 +616,7 @@ function normalizeCreateResponse(providerData, requestedAmount, cfg) {
     sourcePix.emv,
     sourcePayment.pix_code,
     sourcePayment.copy_paste,
+    findPixCodeDeep(source),
   );
 
   const qrCodeBase64 = pickString(
@@ -553,6 +637,7 @@ function normalizeCreateResponse(providerData, requestedAmount, cfg) {
     sourcePix.qrCodeBase64,
     sourcePayment.qr_code,
     sourcePayment.qr_code_base64,
+    findQrCodeDeep(source),
   );
 
   const paymentUrl = pickString(
@@ -573,6 +658,7 @@ function normalizeCreateResponse(providerData, requestedAmount, cfg) {
     sourceCheckout.checkout_url,
     sourceLinks.checkout,
     sourceLinks.payment,
+    findPaymentUrlDeep(source),
   );
   const fallbackOfferHash = pickString(
     source.offer_hash,
@@ -651,6 +737,7 @@ function fillPixPresentationFromProvider(charge, providerData, cfg) {
     sourcePix.emv,
     sourcePayment.pix_code,
     sourcePayment.copy_paste,
+    findPixCodeDeep(source),
   );
 
   const qrCodeBase64 = pickString(
@@ -671,6 +758,7 @@ function fillPixPresentationFromProvider(charge, providerData, cfg) {
     sourcePix.qrCodeBase64,
     sourcePayment.qr_code,
     sourcePayment.qr_code_base64,
+    findQrCodeDeep(source),
   );
 
   const paymentUrl = pickString(
@@ -691,6 +779,7 @@ function fillPixPresentationFromProvider(charge, providerData, cfg) {
     sourceCheckout.checkout_url,
     sourceLinks.checkout,
     sourceLinks.payment,
+    findPaymentUrlDeep(source),
   );
 
   const fallbackOfferHash = pickString(
