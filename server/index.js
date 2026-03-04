@@ -1140,15 +1140,64 @@ async function handleApi(req, res, pathname) {
         return;
       }
 
-      const ownerId = pixChargeOwners.get(txid);
+      const ownerId = findOwnerByTxid(txid);
       if (ownerId && ownerId !== auth.user.id) {
         sendJson(res, 403, { error: "Cobrança Pix pertence a outro usuário." });
         return;
       }
 
-      const charge = runtimeChargeStatus.get(txid);
+      const wallet = ensureWallet(auth.user.id);
+      const userCharges = db.pixCharges[auth.user.id] || [];
+      let existingCharge = userCharges.find((item) => item.txid === txid);
+      let charge = runtimeChargeStatus.get(txid);
+
+      if (!charge) {
+        if (existingCharge) {
+          charge = { ...existingCharge };
+          runtimeChargeStatus.set(txid, charge);
+        } else {
+          const cfg = getPixConfig();
+          if (cfg.statusPathTemplate && cfg.baseUrl && cfg.apiToken) {
+            try {
+              const statusPath = cfg.statusPathTemplate.replace("{txid}", encodeURIComponent(txid));
+              const providerData = await callPixProvider(statusPath, "GET");
+              const normalized = normalizeStatusResponse(providerData, txid);
+              charge = { txid, amount: Number(body.amount || 0), ...normalized, updatedAt: now() };
+              runtimeChargeStatus.set(txid, charge);
+            } catch {
+              // segue fallback abaixo
+            }
+          }
+        }
+      }
+
       if (!charge) {
         sendJson(res, 404, { error: "Cobrança Pix não encontrada." });
+        return;
+      }
+
+      if (charge.status !== "PAID") {
+        const cfg = getPixConfig();
+        if (cfg.statusPathTemplate && cfg.baseUrl && cfg.apiToken) {
+          try {
+            const statusPath = cfg.statusPathTemplate.replace("{txid}", encodeURIComponent(txid));
+            const providerData = await callPixProvider(statusPath, "GET");
+            const normalized = normalizeStatusResponse(providerData, txid);
+            charge = { ...charge, ...normalized, updatedAt: now() };
+            runtimeChargeStatus.set(txid, charge);
+          } catch {
+            // mantém status atual se consulta falhar
+          }
+        }
+      }
+
+      if (charge.status === "PAID") {
+        creditPaidChargeByTxid(txid, Number(charge.amount || body.amount || 0));
+      }
+
+      existingCharge = (db.pixCharges[auth.user.id] || []).find((item) => item.txid === txid);
+      if (existingCharge?.credited) {
+        sendJson(res, 200, { available: formatMoney(wallet.available), currency: APP_CURRENCY });
         return;
       }
 
@@ -1156,10 +1205,6 @@ async function handleApi(req, res, pathname) {
         sendJson(res, 409, { error: "Pagamento ainda não confirmado." });
         return;
       }
-
-      const wallet = ensureWallet(auth.user.id);
-      const userCharges = db.pixCharges[auth.user.id] || [];
-      let existingCharge = userCharges.find((item) => item.txid === txid);
 
       if (!existingCharge) {
         existingCharge = {
