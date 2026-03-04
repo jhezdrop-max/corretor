@@ -28,9 +28,6 @@ export function renderSidebar(currentRoute, session) {
       `,
       ).join("")}
     </ul>
-    <div class="info-box" style="margin-top:auto;">
-      Integrações prontas para API de autenticação, saldo, ordens e Pix.
-    </div>
   `;
 
   return nav;

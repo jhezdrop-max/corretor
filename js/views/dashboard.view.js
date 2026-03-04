@@ -46,14 +46,6 @@ export async function renderDashboardView(container, { navigate }) {
         </div>
       </div>
 
-      <div class="section-card">
-        <div class="section-header">
-          <h3>Status da integração API</h3>
-        </div>
-        <div class="info-box">
-          Front preparado para trocar de mock para API real em autenticação, carteira, ordens e Pix sem alterar a UI.
-        </div>
-      </div>
     </section>
   `;
 
