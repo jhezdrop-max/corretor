@@ -2,12 +2,14 @@ import {
   approveWithdrawRequest,
   getPlatformStats,
   getPixConfigStatus,
+  getAwardsConfigAdmin,
   listClientAccounts,
   listAllClientTransactions,
   listWithdrawRequests,
   payWithdrawRequest,
   rejectWithdrawRequest,
   savePixConfig,
+  updateAwardsConfigAdmin,
   updateClientAccount,
 } from "../api/admin.adapter.js";
 import { openModal } from "../components/modal.js";
@@ -42,6 +44,7 @@ export async function renderAdminView(container) {
   let requests = await listWithdrawRequests();
   let transactions = await listAllClientTransactions();
   let clientAccounts = await listClientAccounts();
+  let awardsConfig = [];
   let autoRefreshTimer = null;
 
   container.innerHTML = `
@@ -222,6 +225,21 @@ export async function renderAdminView(container) {
 
       <article class="section-card">
         <div class="section-header">
+          <h3>Gerenciar Premiações</h3>
+          <small class="help-text">Altere as imagens sem editar código.</small>
+        </div>
+        <div id="awards-admin-message" class="info-box" style="margin-bottom:1rem;">
+          Carregando premiações...
+        </div>
+        <div id="awards-admin-list" class="awards-admin-list"></div>
+        <div class="inline-actions" style="margin-top:0.9rem;">
+          <button class="btn btn-primary" type="button" id="awards-save-btn">Salvar Premiações</button>
+          <button class="btn btn-secondary" type="button" id="awards-reload-btn">Recarregar</button>
+        </div>
+      </article>
+
+      <article class="section-card">
+        <div class="section-header">
           <h3>Painel de Saques (Admin)</h3>
           <small class="help-text">Fluxo: PENDING -> PROCESSING -> PAID / REJECTED</small>
         </div>
@@ -301,6 +319,8 @@ export async function renderAdminView(container) {
   const transactionsTbody = container.querySelector("#admin-transactions-tbody");
   const clientsTbody = container.querySelector("#admin-clients-tbody");
   const pixStatusNode = container.querySelector("#pix-config-status");
+  const awardsNode = container.querySelector("#awards-admin-list");
+  const awardsMessageNode = container.querySelector("#awards-admin-message");
 
   function setMessage(text, type = "error") {
     message.textContent = text;
@@ -349,6 +369,92 @@ export async function renderAdminView(container) {
       container.querySelector("#obs-5xx").textContent = "n/d";
       container.querySelector("#obs-uptime").textContent = "n/d";
     }
+  }
+
+  function renderAwardsEditor() {
+    if (!awardsConfig.length) {
+      awardsNode.innerHTML = '<div class="info-box">Nenhuma premiação configurada.</div>';
+      return;
+    }
+
+    awardsNode.innerHTML = awardsConfig
+      .map(
+        (award, index) => `
+        <div class="section-card" style="margin-bottom:0.85rem;">
+          <div class="section-header">
+            <h3>${escapeHtml(award.title || `Premiação ${index + 1}`)}</h3>
+            <span class="mono">${formatCurrency(award.goal || 0)}</span>
+          </div>
+          <div class="grid-2">
+            <div class="field">
+              <label>Título</label>
+              <input class="input" data-award-title="${index}" type="text" value="${escapeHtml(award.title || "")}" />
+            </div>
+            <div class="field">
+              <label>Meta (R$)</label>
+              <input class="input" data-award-goal="${index}" type="number" min="1" step="1" value="${Number(award.goal || 0)}" />
+            </div>
+          </div>
+          <div class="field">
+            <label>Descrição</label>
+            <textarea class="input" data-award-description="${index}" rows="2">${escapeHtml(award.description || "")}</textarea>
+          </div>
+          <div class="field">
+            <label>Recompensas (uma por linha)</label>
+            <textarea class="input" data-award-rewards="${index}" rows="3">${escapeHtml((award.rewards || []).join("\n"))}</textarea>
+          </div>
+          <div class="field">
+            <label>URL da imagem</label>
+            <input class="input" data-award-image-url="${index}" type="text" value="${escapeHtml(award.imageUrl || "")}" placeholder="https://..." />
+          </div>
+          <div class="field">
+            <label>Texto alternativo da imagem</label>
+            <input class="input" data-award-image-alt="${index}" type="text" value="${escapeHtml(award.imageAlt || "")}" placeholder="Descrição da imagem" />
+          </div>
+        </div>
+      `,
+      )
+      .join("");
+  }
+
+  async function loadAwardsConfig() {
+    try {
+      awardsConfig = await getAwardsConfigAdmin();
+      renderAwardsEditor();
+      awardsMessageNode.className = "success-box";
+      awardsMessageNode.textContent = "Premiações carregadas.";
+    } catch (error) {
+      awardsMessageNode.className = "error-box";
+      awardsMessageNode.textContent = error.message || "Falha ao carregar premiações.";
+    }
+  }
+
+  function collectAwardsFromEditor() {
+    return awardsConfig.map((award, index) => {
+      const title = container.querySelector(`[data-award-title="${index}"]`)?.value?.trim() || award.title || `Premiação ${index + 1}`;
+      const goalRaw = Number(container.querySelector(`[data-award-goal="${index}"]`)?.value || award.goal || 0);
+      const goal = Number.isFinite(goalRaw) && goalRaw > 0 ? goalRaw : Number(award.goal || 1000);
+      const description =
+        container.querySelector(`[data-award-description="${index}"]`)?.value?.trim() ||
+        award.description ||
+        "";
+      const rewardsText = container.querySelector(`[data-award-rewards="${index}"]`)?.value || "";
+      const rewards = rewardsText
+        .split("\n")
+        .map((item) => item.trim())
+        .filter(Boolean);
+      const imageUrl = container.querySelector(`[data-award-image-url="${index}"]`)?.value?.trim() || "";
+      const imageAlt = container.querySelector(`[data-award-image-alt="${index}"]`)?.value?.trim() || "";
+      return {
+        ...award,
+        title,
+        goal,
+        description,
+        rewards: rewards.length ? rewards : award.rewards || [],
+        imageUrl,
+        imageAlt,
+      };
+    });
   }
 
   function filteredTransactions() {
@@ -671,6 +777,20 @@ export async function renderAdminView(container) {
     container.querySelector(selector).addEventListener("change", renderClientAccounts);
   });
   container.querySelector("#pix-status-btn").addEventListener("click", refreshPixStatus);
+  container.querySelector("#awards-reload-btn").addEventListener("click", loadAwardsConfig);
+  container.querySelector("#awards-save-btn").addEventListener("click", async () => {
+    const nextAwards = collectAwardsFromEditor();
+    try {
+      awardsConfig = await updateAwardsConfigAdmin({ awards: nextAwards });
+      renderAwardsEditor();
+      awardsMessageNode.className = "success-box";
+      awardsMessageNode.textContent = "Premiações salvas com sucesso.";
+      showToast("Premiações atualizadas.", "success");
+    } catch (error) {
+      awardsMessageNode.className = "error-box";
+      awardsMessageNode.textContent = error.message || "Falha ao salvar premiações.";
+    }
+  });
   container.querySelector("#admin-refresh-data-btn")?.addEventListener("click", async () => {
     try {
       await refreshData();
@@ -735,6 +855,7 @@ export async function renderAdminView(container) {
   renderTransactions();
   renderClientAccounts();
   await refreshPixStatus();
+  await loadAwardsConfig();
   await refreshMetrics();
 
   return () => {

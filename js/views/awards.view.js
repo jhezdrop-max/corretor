@@ -1,35 +1,19 @@
+import { getAwardsConfig } from "../api/awards.adapter.js";
 import { listMyWithdrawals } from "../api/profile.adapter.js";
 import { formatCurrency } from "../store.js";
 
-const AWARDS = [
-  {
-    goal: 10000,
-    title: "Premiação 1",
-    description: "R$ 10.000,00 em saques sobre ganhos em operações.",
-    rewards: ["Reconhecimento de nível inicial"],
-  },
-  {
-    goal: 100000,
-    title: "Premiação 2",
-    description: "R$ 100.000,00 em saques sobre ganhos em operações.",
-    rewards: ["1 iPhone 17 Pro Max", "1 caneca personalizada"],
-  },
-  {
-    goal: 500000,
-    title: "Premiação 3",
-    description: "R$ 500.000,00 em saques sobre ganhos em operações.",
-    rewards: ["1 iPhone 17 Pro Max", "1 MacBook M2"],
-  },
-  {
-    goal: 1000000,
-    title: "Premiação 4",
-    description: "R$ 1.000.000,00 em saques sobre ganhos em operações.",
-    rewards: ["1 iPhone 17 Pro Max", "1 MacBook M2", "Viagem para o Chile (2 pessoas, tudo pago)"],
-  },
-];
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#039;");
+}
 
 export async function renderAwardsView(container) {
-  const withdrawals = await listMyWithdrawals();
+  const [withdrawals, awardsConfig] = await Promise.all([listMyWithdrawals(), getAwardsConfig()]);
+  const AWARDS = [...awardsConfig].sort((a, b) => Number(a.goal) - Number(b.goal));
   const totalPaidWithdrawals = withdrawals
     .filter((item) => item.status === "PAID")
     .reduce((acc, item) => acc + Number(item.amount || 0), 0);
@@ -51,29 +35,38 @@ export async function renderAwardsView(container) {
         </p>
       </article>
 
-      <div class="awards-grid">
-        ${AWARDS.map((award) => {
+      <div class="section-card awards-journey">
+        <div class="awards-journey-bg"></div>
+        <div class="awards-journey-line"></div>
+        <div class="awards-journey-list">
+        ${AWARDS.map((award, index) => {
           const achieved = totalPaidWithdrawals >= award.goal;
           const pct = Math.max(0, Math.min((totalPaidWithdrawals / award.goal) * 100, 100));
+          const sideClass = index % 2 === 0 ? "left" : "right";
           return `
-            <article class="section-card awards-tier ${achieved ? "awards-tier-done" : ""}">
-              <div class="section-header">
-                <h3>${award.title}</h3>
+            <article class="awards-tier awards-tier-journey ${sideClass} ${achieved ? "awards-tier-done" : ""}">
+              <div class="awards-tier-head">
+                <h3>${escapeHtml(award.title)}</h3>
                 <span class="badge ${achieved ? "badge-paid" : "badge-pending"}">${achieved ? "LIBERADA" : "EM PROGRESSO"}</span>
               </div>
-              <p class="mono" style="font-size:1.08rem; margin-bottom:0.45rem;">Meta: ${formatCurrency(award.goal)}</p>
-              <p style="color:var(--text-1); margin-bottom:0.8rem;">${award.description}</p>
+              <p class="mono awards-tier-goal">META: ${formatCurrency(award.goal)}</p>
+              <p class="awards-tier-desc">${escapeHtml(award.description)}</p>
               <div class="awards-progress-track awards-progress-track-sm">
                 <div class="awards-progress-fill" style="width:${pct.toFixed(2)}%;"></div>
               </div>
-              <p class="help-text" style="margin-top:0.55rem;">Progresso da meta: ${pct.toFixed(2)}%</p>
+              <p class="help-text" style="margin-top:0.55rem;">Progresso: ${pct.toFixed(2)}%</p>
               <ul class="awards-reward-list">
-                ${award.rewards.map((reward) => `<li>${reward}</li>`).join("")}
+                ${award.rewards.map((reward) => `<li>${escapeHtml(reward)}</li>`).join("")}
               </ul>
-              <div class="awards-image-slot">Espaço para imagem da premiação</div>
+              ${
+                award.imageUrl
+                  ? `<img class="awards-image-preview" src="${escapeHtml(award.imageUrl)}" alt="${escapeHtml(award.imageAlt || award.title)}" />`
+                  : '<div class="awards-image-slot">Espaço para imagem da premiação</div>'
+              }
             </article>
           `;
         }).join("")}
+        </div>
       </div>
     </section>
   `;

@@ -8,6 +8,8 @@ const defaultEndpoints = {
   wallet: "/api/wallet",
   trades: "/api/trades",
   pix: "/api/pix",
+  awards: "/api/awards",
+  admin: "/api/admin",
 };
 
 export const ENDPOINTS = {

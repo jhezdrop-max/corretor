@@ -521,6 +521,75 @@
   gap: var(--space-3);
 }
 
+.awards-journey {
+  position: relative;
+  overflow: hidden;
+  padding: 1.2rem 1rem 1.1rem;
+}
+
+.awards-journey-bg {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 20% 10%, rgba(35, 197, 255, 0.16), transparent 38%),
+    radial-gradient(circle at 80% 70%, rgba(26, 88, 136, 0.22), transparent 42%),
+    linear-gradient(160deg, rgba(8, 24, 38, 0.8), rgba(4, 16, 28, 0.9));
+  pointer-events: none;
+}
+
+.awards-journey-line {
+  position: absolute;
+  left: 50%;
+  top: 0.8rem;
+  bottom: 0.8rem;
+  width: 2px;
+  transform: translateX(-50%);
+  background: linear-gradient(180deg, rgba(35, 197, 255, 0.45), rgba(35, 197, 255, 0.15));
+  box-shadow: 0 0 12px rgba(35, 197, 255, 0.2);
+}
+
+.awards-journey-list {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 1.2rem;
+}
+
+.awards-tier-journey {
+  width: min(360px, calc(50% - 1.2rem));
+  background: linear-gradient(160deg, rgba(7, 24, 40, 0.9), rgba(4, 18, 30, 0.9));
+  border: 1px solid rgba(35, 197, 255, 0.24);
+  border-radius: 14px;
+  padding: 0.9rem;
+  backdrop-filter: blur(2px);
+}
+
+.awards-tier-journey.left {
+  justify-self: start;
+}
+
+.awards-tier-journey.right {
+  justify-self: end;
+}
+
+.awards-tier-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.awards-tier-goal {
+  font-size: 0.88rem;
+  letter-spacing: 0.08em;
+  margin-top: 0.1rem;
+}
+
+.awards-tier-desc {
+  color: var(--text-1);
+  margin-bottom: 0.2rem;
+}
+
 .awards-tier-done {
   border-color: rgba(34, 195, 124, 0.45);
   box-shadow: 0 0 0 1px rgba(34, 195, 124, 0.15) inset;
@@ -543,6 +612,21 @@
   place-items: center;
   color: var(--text-2);
   font-size: 0.86rem;
+}
+
+.awards-image-preview {
+  width: 100%;
+  min-height: 130px;
+  max-height: 250px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: rgba(8, 26, 37, 0.75);
+}
+
+.awards-admin-list {
+  display: grid;
+  gap: var(--space-3);
 }
 
 .error-box,
@@ -654,5 +738,14 @@
 
   .awards-grid {
     grid-template-columns: 1fr;
+  }
+
+  .awards-journey-line {
+    left: 24px;
+  }
+
+  .awards-tier-journey {
+    width: calc(100% - 2rem);
+    justify-self: end;
   }
 }

@@ -1,12 +1,21 @@
+import { getAwardsConfig } from "../api/awards.adapter.js";
 import { getBalance } from "../api/wallet.adapter.js";
 import { listTrades } from "../api/trade.adapter.js";
 import { formatCurrency } from "../store.js";
 import { listMyWithdrawals } from "../api/profile.adapter.js";
 
-const AWARD_TIERS = [10000, 100000, 500000, 1000000];
-
 export async function renderDashboardView(container, { navigate }) {
-  const [wallet, trades, withdrawals] = await Promise.all([getBalance(), listTrades(), listMyWithdrawals()]);
+  const [wallet, trades, withdrawals, awards] = await Promise.all([
+    getBalance(),
+    listTrades(),
+    listMyWithdrawals(),
+    getAwardsConfig(),
+  ]);
+  const AWARD_TIERS = [...awards]
+    .map((item) => Number(item.goal || 0))
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .sort((a, b) => a - b);
+  const tiers = AWARD_TIERS.length ? AWARD_TIERS : [10000, 100000, 500000, 1000000];
   const closedToday = trades.filter((trade) => trade.closedAt && new Date(trade.closedAt).toDateString() === new Date().toDateString());
   const pnlToday = closedToday.reduce((acc, trade) => {
     if (trade.status === "WIN") return acc + (trade.payoutAmount - trade.amount);
@@ -17,7 +26,7 @@ export async function renderDashboardView(container, { navigate }) {
   const totalPaidWithdrawals = withdrawals
     .filter((item) => item.status === "PAID")
     .reduce((acc, item) => acc + Number(item.amount || 0), 0);
-  const nextGoal = AWARD_TIERS.find((value) => totalPaidWithdrawals < value) || AWARD_TIERS[AWARD_TIERS.length - 1];
+  const nextGoal = tiers.find((value) => totalPaidWithdrawals < value) || tiers[tiers.length - 1];
   const progressPct = Math.max(0, Math.min((totalPaidWithdrawals / nextGoal) * 100, 100));
 
   const openCount = trades.filter((trade) => trade.status === "OPEN").length;

@@ -11,6 +11,45 @@ import {
 } from "../mocks/mock-db.js";
 import { requireSession } from "../store.js";
 
+const DEFAULT_AWARDS = [
+  {
+    id: "award-10000",
+    goal: 10000,
+    title: "Premiação 1",
+    description: "R$ 10.000,00 em saques sobre ganhos em operações.",
+    rewards: ["Reconhecimento de nível inicial"],
+    imageUrl: "",
+    imageAlt: "Premiação de R$ 10.000",
+  },
+  {
+    id: "award-100000",
+    goal: 100000,
+    title: "Premiação 2",
+    description: "R$ 100.000,00 em saques sobre ganhos em operações.",
+    rewards: ["1 iPhone 17 Pro Max", "1 caneca personalizada"],
+    imageUrl: "",
+    imageAlt: "Premiação de R$ 100.000",
+  },
+  {
+    id: "award-500000",
+    goal: 500000,
+    title: "Premiação 3",
+    description: "R$ 500.000,00 em saques sobre ganhos em operações.",
+    rewards: ["1 iPhone 17 Pro Max", "1 MacBook M2"],
+    imageUrl: "",
+    imageAlt: "Premiação de R$ 500.000",
+  },
+  {
+    id: "award-1000000",
+    goal: 1000000,
+    title: "Premiação 4",
+    description: "R$ 1.000.000,00 em saques sobre ganhos em operações.",
+    rewards: ["1 iPhone 17 Pro Max", "1 MacBook M2", "Viagem para o Chile (2 pessoas, tudo pago)"],
+    imageUrl: "",
+    imageAlt: "Premiação de R$ 1.000.000",
+  },
+];
+
 function ensureAdmin(session) {
   if (!session.user?.isAdmin) {
     throw new Error("Acesso restrito ao administrador.");
@@ -214,7 +253,7 @@ export async function getPixConfigStatus({ adminSecret = "" } = {}) {
   const session = requireSession();
   ensureAdmin(session);
 
-  const response = await fetch(`/api/admin/pix-config/status`, {
+  const response = await fetch(`${ENDPOINTS.admin}/pix-config/status`, {
     headers: {
       "X-Client-Session": session.token,
       ...(adminSecret ? { "X-Admin-Secret": adminSecret } : {}),
@@ -244,7 +283,7 @@ export async function savePixConfig({
   const session = requireSession();
   ensureAdmin(session);
 
-  const response = await fetch(`/api/admin/pix-config`, {
+  const response = await fetch(`${ENDPOINTS.admin}/pix-config`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -270,4 +309,49 @@ export async function savePixConfig({
   }
 
   return response.json();
+}
+
+export async function getAwardsConfigAdmin() {
+  const session = requireSession();
+  ensureAdmin(session);
+
+  if (API_MODE === "real") {
+    const response = await fetch(`${ENDPOINTS.admin}/awards`, {
+      headers: {
+        Authorization: `Bearer ${session.token}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error("Falha ao carregar premiações.");
+    }
+
+    return response.json();
+  }
+
+  return DEFAULT_AWARDS;
+}
+
+export async function updateAwardsConfigAdmin({ awards }) {
+  const session = requireSession();
+  ensureAdmin(session);
+
+  if (API_MODE === "real") {
+    const response = await fetch(`${ENDPOINTS.admin}/awards`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.token}`,
+      },
+      body: JSON.stringify({ awards }),
+    });
+
+    if (!response.ok) {
+      throw new Error("Falha ao salvar premiações.");
+    }
+
+    return response.json();
+  }
+
+  return awards;
 }

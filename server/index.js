@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { readFile, stat } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,6 +42,8 @@ const API_ALLOWED_ORIGINS = String(process.env.API_ALLOWED_ORIGINS || "")
   .split(",")
   .map((item) => item.trim())
   .filter(Boolean);
+const DB_FILE_PATH = process.env.DB_FILE_PATH || path.resolve(ROOT_DIR, "data", "byetrader-db.json");
+const DB_AUTOSAVE_INTERVAL_MS = Number(process.env.DB_AUTOSAVE_INTERVAL_MS || 2000);
 
 const runtimePixConfig = {
   baseUrl: "",
@@ -59,6 +61,45 @@ const runtimePixConfig = {
 const runtimeChargeStatus = new Map();
 const pixChargeOwners = new Map();
 const authSessions = new Map();
+
+const DEFAULT_AWARDS = [
+  {
+    id: "award-10000",
+    goal: 10000,
+    title: "Premiação 1",
+    description: "R$ 10.000,00 em saques sobre ganhos em operações.",
+    rewards: ["Reconhecimento de nível inicial"],
+    imageUrl: "",
+    imageAlt: "Premiação de R$ 10.000",
+  },
+  {
+    id: "award-100000",
+    goal: 100000,
+    title: "Premiação 2",
+    description: "R$ 100.000,00 em saques sobre ganhos em operações.",
+    rewards: ["1 iPhone 17 Pro Max", "1 caneca personalizada"],
+    imageUrl: "",
+    imageAlt: "Premiação de R$ 100.000",
+  },
+  {
+    id: "award-500000",
+    goal: 500000,
+    title: "Premiação 3",
+    description: "R$ 500.000,00 em saques sobre ganhos em operações.",
+    rewards: ["1 iPhone 17 Pro Max", "1 MacBook M2"],
+    imageUrl: "",
+    imageAlt: "Premiação de R$ 500.000",
+  },
+  {
+    id: "award-1000000",
+    goal: 1000000,
+    title: "Premiação 4",
+    description: "R$ 1.000.000,00 em saques sobre ganhos em operações.",
+    rewards: ["1 iPhone 17 Pro Max", "1 MacBook M2", "Viagem para o Chile (2 pessoas, tudo pago)"],
+    imageUrl: "",
+    imageAlt: "Premiação de R$ 1.000.000",
+  },
+];
 
 function randomId() {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
@@ -155,10 +196,141 @@ function seedDb() {
         createdAt: startedAt,
       },
     ],
+    settings: {
+      awards: DEFAULT_AWARDS.map((item) => ({ ...item })),
+      pixConfig: {},
+    },
   };
 }
 
-const db = seedDb();
+function normalizeAwardsConfig(value) {
+  const source = Array.isArray(value) && value.length ? value : DEFAULT_AWARDS;
+  return source
+    .map((item, index) => {
+      const fallback = DEFAULT_AWARDS[index] || DEFAULT_AWARDS[DEFAULT_AWARDS.length - 1];
+      const rewards = Array.isArray(item.rewards)
+        ? item.rewards.map((entry) => String(entry || "").trim()).filter(Boolean)
+        : fallback.rewards;
+
+      return {
+        id: String(item.id || fallback.id || `award-${index + 1}`),
+        goal: Number(item.goal || fallback.goal || 0),
+        title: String(item.title || fallback.title || `Premiação ${index + 1}`),
+        description: String(item.description || fallback.description || ""),
+        rewards,
+        imageUrl: String(item.imageUrl || ""),
+        imageAlt: String(item.imageAlt || item.title || fallback.title || "Premiação"),
+      };
+    })
+    .filter((item) => Number.isFinite(item.goal) && item.goal > 0);
+}
+
+function normalizeDb(input) {
+  const seeded = seedDb();
+  const merged = {
+    ...seeded,
+    ...(input && typeof input === "object" ? input : {}),
+  };
+
+  merged.users = Array.isArray(merged.users) ? merged.users : seeded.users;
+  merged.wallets = merged.wallets && typeof merged.wallets === "object" ? merged.wallets : seeded.wallets;
+  merged.trades = merged.trades && typeof merged.trades === "object" ? merged.trades : seeded.trades;
+  merged.pixCharges =
+    merged.pixCharges && typeof merged.pixCharges === "object" ? merged.pixCharges : seeded.pixCharges;
+  merged.withdrawals = Array.isArray(merged.withdrawals) ? merged.withdrawals : [];
+  merged.transactions = Array.isArray(merged.transactions) ? merged.transactions : [];
+  merged.settings = merged.settings && typeof merged.settings === "object" ? merged.settings : {};
+  merged.settings.awards = normalizeAwardsConfig(merged.settings.awards);
+  merged.settings.pixConfig =
+    merged.settings.pixConfig && typeof merged.settings.pixConfig === "object"
+      ? merged.settings.pixConfig
+      : {};
+
+  const byEmail = (email) =>
+    merged.users.find((item) => normalizeEmail(item.email) === normalizeEmail(email));
+  const startedAt = now();
+
+  if (!byEmail("demo@byetrader.com")) {
+    const demoUserId = randomId();
+    merged.users.push({
+      id: demoUserId,
+      name: "Cliente Demo",
+      email: "demo@byetrader.com",
+      password: "123456",
+      cpf: "12345678909",
+      pixKey: "demo@byetrader.com",
+      address: "Rua Exemplo, 100 - Centro, São Paulo/SP",
+      isAdmin: false,
+      isActive: true,
+      createdAt: startedAt,
+    });
+  }
+
+  if (!byEmail("admin@byetrader.com")) {
+    const adminUserId = randomId();
+    merged.users.push({
+      id: adminUserId,
+      name: "Administrador",
+      email: "admin@byetrader.com",
+      password: "admin123",
+      cpf: "00000000000",
+      pixKey: "admin@byetrader.com",
+      address: "Sede Administrativa",
+      isAdmin: true,
+      isActive: true,
+      createdAt: startedAt,
+    });
+  }
+
+  for (const user of merged.users) {
+    if (!merged.wallets[user.id]) {
+      merged.wallets[user.id] = { available: user.isAdmin ? 0 : 1000, currency: APP_CURRENCY };
+    }
+    if (!merged.trades[user.id]) merged.trades[user.id] = [];
+    if (!merged.pixCharges[user.id]) merged.pixCharges[user.id] = [];
+  }
+
+  return merged;
+}
+
+async function readDbFromDisk() {
+  try {
+    if (!existsSync(DB_FILE_PATH)) return seedDb();
+    const raw = await readFile(DB_FILE_PATH, "utf-8");
+    if (!raw.trim()) return seedDb();
+    return normalizeDb(JSON.parse(raw));
+  } catch {
+    return seedDb();
+  }
+}
+
+let db = await readDbFromDisk();
+let dbDirty = false;
+let dbSaving = false;
+
+if (!existsSync(DB_FILE_PATH)) {
+  dbDirty = true;
+}
+
+function markDbDirty() {
+  dbDirty = true;
+}
+
+async function saveDbIfDirty() {
+  if (!dbDirty || dbSaving) return;
+  dbSaving = true;
+
+  try {
+    const folder = path.dirname(DB_FILE_PATH);
+    await mkdir(folder, { recursive: true });
+    await writeFile(DB_FILE_PATH, JSON.stringify(db, null, 2), "utf-8");
+    dbDirty = false;
+  } catch (error) {
+    console.error("Erro ao salvar banco local:", error?.message || error);
+  } finally {
+    dbSaving = false;
+  }
+}
 
 function findUserById(userId) {
   return db.users.find((item) => item.id === userId) || null;
@@ -170,9 +342,18 @@ function findUserByEmail(email) {
 }
 
 function ensureWallet(userId) {
-  if (!db.wallets[userId]) db.wallets[userId] = { available: 0, currency: APP_CURRENCY };
-  if (!db.trades[userId]) db.trades[userId] = [];
-  if (!db.pixCharges[userId]) db.pixCharges[userId] = [];
+  if (!db.wallets[userId]) {
+    db.wallets[userId] = { available: 0, currency: APP_CURRENCY };
+    markDbDirty();
+  }
+  if (!db.trades[userId]) {
+    db.trades[userId] = [];
+    markDbDirty();
+  }
+  if (!db.pixCharges[userId]) {
+    db.pixCharges[userId] = [];
+    markDbDirty();
+  }
   return db.wallets[userId];
 }
 
@@ -194,6 +375,7 @@ function recordTransaction(userId, payload) {
     description: payload.description || "",
     createdAt: payload.createdAt || now(),
   });
+  markDbDirty();
 }
 
 function listUserTransactions(userId) {
@@ -228,6 +410,7 @@ function ensureDbCharge(ownerId, txid, amountHint = 0) {
       credited: false,
     };
     db.pixCharges[ownerId].unshift(charge);
+    markDbDirty();
   }
   return charge;
 }
@@ -248,6 +431,7 @@ function creditPaidChargeByTxid(txid, amountHint = 0) {
   wallet.available = formatMoney(Number(wallet.available || 0) + amount);
   charge.credited = true;
   charge.amount = amount;
+  markDbDirty();
 
   recordTransaction(ownerId, {
     category: "deposit",
@@ -457,17 +641,30 @@ function mapPixStatus(value) {
 }
 
 function getPixConfig() {
+  const savedPixConfig = db?.settings?.pixConfig || {};
   return {
-    baseUrl: runtimePixConfig.baseUrl || PIX_PROVIDER_BASE_URL,
-    createPath: runtimePixConfig.createPath || PIX_CREATE_PATH,
-    statusPathTemplate: runtimePixConfig.statusPathTemplate || PIX_STATUS_PATH_TEMPLATE,
-    apiToken: runtimePixConfig.apiToken || PIX_API_TOKEN,
-    authScheme: runtimePixConfig.authScheme || PIX_AUTH_SCHEME,
-    offerHash: runtimePixConfig.offerHash || process.env.PIX_OFFER_HASH || "",
-    productHash: runtimePixConfig.productHash || process.env.PIX_PRODUCT_HASH || "",
-    productTitle: runtimePixConfig.productTitle || process.env.PIX_PRODUCT_TITLE || "Deposito Bye Trader",
-    productCover: runtimePixConfig.productCover || process.env.PIX_PRODUCT_COVER || "",
-    productSalePage: runtimePixConfig.productSalePage || process.env.PIX_PRODUCT_SALE_PAGE || "",
+    baseUrl: runtimePixConfig.baseUrl || savedPixConfig.baseUrl || PIX_PROVIDER_BASE_URL,
+    createPath: runtimePixConfig.createPath || savedPixConfig.createPath || PIX_CREATE_PATH,
+    statusPathTemplate:
+      runtimePixConfig.statusPathTemplate ||
+      savedPixConfig.statusPathTemplate ||
+      PIX_STATUS_PATH_TEMPLATE,
+    apiToken: runtimePixConfig.apiToken || savedPixConfig.apiToken || PIX_API_TOKEN,
+    authScheme: runtimePixConfig.authScheme || savedPixConfig.authScheme || PIX_AUTH_SCHEME,
+    offerHash: runtimePixConfig.offerHash || savedPixConfig.offerHash || process.env.PIX_OFFER_HASH || "",
+    productHash:
+      runtimePixConfig.productHash || savedPixConfig.productHash || process.env.PIX_PRODUCT_HASH || "",
+    productTitle:
+      runtimePixConfig.productTitle ||
+      savedPixConfig.productTitle ||
+      process.env.PIX_PRODUCT_TITLE ||
+      "Deposito Bye Trader",
+    productCover: runtimePixConfig.productCover || savedPixConfig.productCover || process.env.PIX_PRODUCT_COVER || "",
+    productSalePage:
+      runtimePixConfig.productSalePage ||
+      savedPixConfig.productSalePage ||
+      process.env.PIX_PRODUCT_SALE_PAGE ||
+      "",
   };
 }
 
@@ -967,6 +1164,15 @@ function validateUserProfileData({ name, email, cpf, pixKey, address }) {
   return "";
 }
 
+function getAwardsConfig() {
+  if (!db.settings) db.settings = {};
+  if (!Array.isArray(db.settings.awards) || !db.settings.awards.length) {
+    db.settings.awards = normalizeAwardsConfig(DEFAULT_AWARDS);
+    markDbDirty();
+  }
+  return db.settings.awards;
+}
+
 async function handleApi(req, res, pathname) {
   applyApiCorsHeaders(req, res);
   apiMetrics.totalRequests += 1;
@@ -992,6 +1198,41 @@ async function handleApi(req, res, pathname) {
       ...apiMetrics,
       uptimeSeconds: Math.floor((now() - apiMetrics.startedAt) / 1000),
     });
+    return;
+  }
+
+  if (pathname === "/api/awards" && req.method === "GET") {
+    const auth = requireAuth(req, res);
+    if (!auth) return;
+    sendJson(res, 200, getAwardsConfig());
+    return;
+  }
+
+  if (pathname === "/api/admin/awards" && req.method === "GET") {
+    const auth = requireAuth(req, res, { adminOnly: true });
+    if (!auth) return;
+    sendJson(res, 200, getAwardsConfig());
+    return;
+  }
+
+  if (pathname === "/api/admin/awards" && req.method === "PUT") {
+    const auth = requireAuth(req, res, { adminOnly: true });
+    if (!auth) return;
+
+    try {
+      const body = await readJsonBody(req);
+      const awards = normalizeAwardsConfig(Array.isArray(body.awards) ? body.awards : []);
+      if (!awards.length) {
+        sendJson(res, 400, { error: "Lista de premiações inválida." });
+        return;
+      }
+      db.settings = db.settings || {};
+      db.settings.awards = awards;
+      markDbDirty();
+      sendJson(res, 200, awards);
+    } catch {
+      sendJson(res, 400, { error: "Payload inválido para premiações." });
+    }
     return;
   }
 
@@ -1034,6 +1275,7 @@ async function handleApi(req, res, pathname) {
       };
       db.users.push(user);
       ensureWallet(userId);
+      markDbDirty();
 
       const token = createAuthToken(user.id);
       sendJson(res, 201, { user: publicUser(user), token });
@@ -1112,6 +1354,7 @@ async function handleApi(req, res, pathname) {
       auth.user.cpf = cpf;
       auth.user.pixKey = pixKey;
       auth.user.address = address;
+      markDbDirty();
 
       sendJson(res, 200, publicUser(auth.user));
     } catch {
@@ -1219,6 +1462,7 @@ async function handleApi(req, res, pathname) {
         };
         userCharges.unshift(existingCharge);
         db.pixCharges[auth.user.id] = userCharges;
+        markDbDirty();
       }
 
       if (!existingCharge.credited) {
@@ -1226,6 +1470,7 @@ async function handleApi(req, res, pathname) {
         wallet.available = formatMoney(Number(wallet.available || 0) + amount);
         existingCharge.credited = true;
         existingCharge.status = "PAID";
+        markDbDirty();
 
         recordTransaction(auth.user.id, {
           category: "deposit",
@@ -1301,6 +1546,7 @@ async function handleApi(req, res, pathname) {
       };
 
       db.withdrawals.unshift(request);
+      markDbDirty();
       recordTransaction(auth.user.id, {
         category: "withdraw",
         eventType: "WITHDRAW_REQUESTED",
@@ -1382,6 +1628,7 @@ async function handleApi(req, res, pathname) {
 
       if (!db.trades[auth.user.id]) db.trades[auth.user.id] = [];
       db.trades[auth.user.id].unshift(trade);
+      markDbDirty();
 
       recordTransaction(auth.user.id, {
         category: "trade",
@@ -1434,6 +1681,7 @@ async function handleApi(req, res, pathname) {
       const isWin = trade.direction === "CALL" ? closePrice >= trade.openPrice : closePrice <= trade.openPrice;
       trade.status = isWin ? "WIN" : "LOSS";
       trade.closedAt = now();
+      markDbDirty();
 
       const wallet = ensureWallet(auth.user.id);
       if (isWin) {
@@ -1502,6 +1750,7 @@ async function handleApi(req, res, pathname) {
     request.status = "PROCESSING";
     request.processingAt = now();
     request.processedBy = auth.user.id;
+    markDbDirty();
 
     recordTransaction(request.userId, {
       category: "withdraw",
@@ -1540,6 +1789,7 @@ async function handleApi(req, res, pathname) {
     request.status = "PAID";
     request.approvedAt = now();
     request.approvedBy = auth.user.id;
+    markDbDirty();
 
     recordTransaction(request.userId, {
       category: "withdraw",
@@ -1587,6 +1837,7 @@ async function handleApi(req, res, pathname) {
       request.rejectedAt = now();
       request.rejectedBy = auth.user.id;
       request.rejectReason = reason;
+      markDbDirty();
 
       recordTransaction(request.userId, {
         category: "withdraw",
@@ -1660,6 +1911,7 @@ async function handleApi(req, res, pathname) {
       user.pixKey = pixKey;
       user.address = address;
       user.isActive = isActive;
+      markDbDirty();
 
       const wallet = ensureWallet(user.id);
       if (Number.isFinite(balanceAdjustment) && Math.abs(balanceAdjustment) > 0.000001) {
@@ -1670,6 +1922,7 @@ async function handleApi(req, res, pathname) {
         }
 
         wallet.available = nextBalance;
+        markDbDirty();
         recordTransaction(user.id, {
           category: "admin",
           eventType: "ADMIN_BALANCE_ADJUSTMENT",
@@ -1770,6 +2023,20 @@ async function handleApi(req, res, pathname) {
       runtimePixConfig.productTitle = productTitle;
       runtimePixConfig.productCover = productCover;
       runtimePixConfig.productSalePage = productSalePage;
+      db.settings = db.settings || {};
+      db.settings.pixConfig = {
+        baseUrl,
+        createPath,
+        statusPathTemplate,
+        authScheme,
+        apiToken,
+        offerHash,
+        productHash,
+        productTitle,
+        productCover,
+        productSalePage,
+      };
+      markDbDirty();
 
       sendJson(res, 200, { ok: true, message: "Configuração Pix salva em runtime no servidor." });
     } catch {
@@ -1868,6 +2135,7 @@ async function handleApi(req, res, pathname) {
         qrCodeBase64: normalized.qrCodeBase64 || "",
         credited: false,
       });
+      markDbDirty();
 
       recordTransaction(clientUser.id, {
         category: "deposit",
@@ -1969,6 +2237,7 @@ async function handleApi(req, res, pathname) {
       if (status === "PAID") {
         creditPaidChargeByTxid(txid, amount);
       }
+      markDbDirty();
 
       sendJson(res, 200, { ok: true });
     } catch {
@@ -1993,6 +2262,7 @@ function isSensitivePath(pathname, filePath) {
   const segments = normalizedPath.split("/").filter(Boolean);
   if (segments.some((segment) => segment.startsWith("."))) return true;
   if (segments[0] === "backups") return true;
+  if (segments[0] === "data") return true;
 
   const baseName = path.basename(filePath).toLowerCase();
   if (
@@ -2084,6 +2354,32 @@ const server = createServer(async (req, res) => {
 
   await serveStatic(req, res, pathname);
 });
+
+const autosaveHandle = setInterval(() => {
+  saveDbIfDirty().catch(() => {});
+}, DB_AUTOSAVE_INTERVAL_MS);
+
+async function gracefulShutdown(signal) {
+  clearInterval(autosaveHandle);
+  await saveDbIfDirty();
+  server.close(() => {
+    process.exit(0);
+  });
+  setTimeout(() => process.exit(0), 3000).unref();
+  if (signal) {
+    console.log(`Encerrando com ${signal}...`);
+  }
+}
+
+process.on("SIGINT", () => {
+  gracefulShutdown("SIGINT").catch(() => process.exit(0));
+});
+
+process.on("SIGTERM", () => {
+  gracefulShutdown("SIGTERM").catch(() => process.exit(0));
+});
+
+await saveDbIfDirty();
 
 server.listen(PORT, () => {
   console.log(`Secure app server running on http://localhost:${PORT}`);
