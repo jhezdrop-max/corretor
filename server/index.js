@@ -37,6 +37,9 @@ const PIX_TIMEOUT_MS = Number(process.env.PIX_TIMEOUT_MS || 12000);
 const ADMIN_PANEL_SECRET = process.env.ADMIN_PANEL_SECRET || "";
 const APP_CURRENCY = process.env.APP_CURRENCY || "BRL";
 const PAYOUT_RATE = Number(process.env.TRADE_PAYOUT_RATE || 0.8);
+const MIN_DEPOSIT_AMOUNT = Number(process.env.MIN_DEPOSIT_AMOUNT || 30);
+const MIN_WITHDRAW_AMOUNT = Number(process.env.MIN_WITHDRAW_AMOUNT || 80);
+const WITHDRAW_FEE_RATE = Number(process.env.WITHDRAW_FEE_RATE || 0.089);
 const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS || 12 * 60 * 60 * 1000);
 const API_ALLOWED_ORIGINS = String(process.env.API_ALLOWED_ORIGINS || "")
   .split(",")
@@ -100,6 +103,31 @@ const DEFAULT_AWARDS = [
     imageAlt: "Premiação de R$ 1.000.000",
   },
 ];
+
+const BANNER_SLOTS = [
+  "dashboard_after_awards",
+  "awards_before_progress",
+  "deposit_after_generate",
+  "trade_before_history",
+  "bonus_bottom",
+];
+
+const DEFAULT_CONTENT_CONFIG = {
+  banners: {
+    dashboard_after_awards: { enabled: false, title: "", text: "", imageUrl: "", linkUrl: "" },
+    awards_before_progress: { enabled: false, title: "", text: "", imageUrl: "", linkUrl: "" },
+    deposit_after_generate: { enabled: false, title: "", text: "", imageUrl: "", linkUrl: "" },
+    trade_before_history: { enabled: false, title: "", text: "", imageUrl: "", linkUrl: "" },
+    bonus_bottom: { enabled: false, title: "", text: "", imageUrl: "", linkUrl: "" },
+  },
+  bonusCpa: {
+    pageTitle: "Bônus e CPA",
+    pageText:
+      "Programa de afiliados com CPA fixo no 1º depósito e comissão percentual nos próximos depósitos do indicado.",
+    cpaValue: 20,
+    recurringRatePct: 20,
+  },
+};
 
 function randomId() {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
@@ -199,7 +227,11 @@ function seedDb() {
     settings: {
       awards: DEFAULT_AWARDS.map((item) => ({ ...item })),
       pixConfig: {},
+      content: JSON.parse(JSON.stringify(DEFAULT_CONTENT_CONFIG)),
     },
+    supportTickets: [],
+    affiliateApplications: [],
+    affiliates: {},
   };
 }
 
@@ -225,6 +257,43 @@ function normalizeAwardsConfig(value) {
     .filter((item) => Number.isFinite(item.goal) && item.goal > 0);
 }
 
+function normalizeContentConfig(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const sourceBanners = source.banners && typeof source.banners === "object" ? source.banners : {};
+  const banners = {};
+
+  for (const slot of BANNER_SLOTS) {
+    const item = sourceBanners[slot] && typeof sourceBanners[slot] === "object" ? sourceBanners[slot] : {};
+    banners[slot] = {
+      enabled: Boolean(item.enabled),
+      title: String(item.title || ""),
+      text: String(item.text || ""),
+      imageUrl: String(item.imageUrl || ""),
+      linkUrl: String(item.linkUrl || ""),
+    };
+  }
+
+  const bonusRaw = source.bonusCpa && typeof source.bonusCpa === "object" ? source.bonusCpa : {};
+  const cpaValueRaw = Number(bonusRaw.cpaValue);
+  const recurringRateRaw = Number(bonusRaw.recurringRatePct);
+
+  return {
+    banners,
+    bonusCpa: {
+      pageTitle: String(bonusRaw.pageTitle || DEFAULT_CONTENT_CONFIG.bonusCpa.pageTitle),
+      pageText: String(bonusRaw.pageText || DEFAULT_CONTENT_CONFIG.bonusCpa.pageText),
+      cpaValue:
+        Number.isFinite(cpaValueRaw) && cpaValueRaw >= 0
+          ? formatMoney(cpaValueRaw)
+          : DEFAULT_CONTENT_CONFIG.bonusCpa.cpaValue,
+      recurringRatePct:
+        Number.isFinite(recurringRateRaw) && recurringRateRaw >= 0
+          ? formatMoney(recurringRateRaw)
+          : DEFAULT_CONTENT_CONFIG.bonusCpa.recurringRatePct,
+    },
+  };
+}
+
 function normalizeDb(input) {
   const seeded = seedDb();
   const merged = {
@@ -245,6 +314,23 @@ function normalizeDb(input) {
     merged.settings.pixConfig && typeof merged.settings.pixConfig === "object"
       ? merged.settings.pixConfig
       : {};
+  merged.settings.content = normalizeContentConfig(merged.settings.content);
+  merged.supportTickets = Array.isArray(merged.supportTickets) ? merged.supportTickets : [];
+  merged.affiliateApplications = Array.isArray(merged.affiliateApplications)
+    ? merged.affiliateApplications
+    : [];
+  merged.affiliates = merged.affiliates && typeof merged.affiliates === "object" ? merged.affiliates : {};
+  merged.withdrawals = merged.withdrawals.map((item) => {
+    const amount = formatMoney(Number(item.amount || 0));
+    const feeAmount = formatMoney(Number(item.feeAmount || 0));
+    const totalDebit = formatMoney(Number(item.totalDebit || amount + feeAmount));
+    return {
+      ...item,
+      amount,
+      feeAmount,
+      totalDebit,
+    };
+  });
 
   const byEmail = (email) =>
     merged.users.find((item) => normalizeEmail(item.email) === normalizeEmail(email));
@@ -262,6 +348,8 @@ function normalizeDb(input) {
       address: "Rua Exemplo, 100 - Centro, São Paulo/SP",
       isAdmin: false,
       isActive: true,
+      referredByAffiliateId: "",
+      firstDepositAt: 0,
       createdAt: startedAt,
     });
   }
@@ -278,16 +366,46 @@ function normalizeDb(input) {
       address: "Sede Administrativa",
       isAdmin: true,
       isActive: true,
+      referredByAffiliateId: "",
+      firstDepositAt: 0,
       createdAt: startedAt,
     });
   }
 
   for (const user of merged.users) {
+    user.referredByAffiliateId = String(user.referredByAffiliateId || "");
+    user.firstDepositAt = Number(user.firstDepositAt || 0);
     if (!merged.wallets[user.id]) {
       merged.wallets[user.id] = { available: user.isAdmin ? 0 : 1000, currency: APP_CURRENCY };
     }
     if (!merged.trades[user.id]) merged.trades[user.id] = [];
     if (!merged.pixCharges[user.id]) merged.pixCharges[user.id] = [];
+    if (!merged.affiliates[user.id]) {
+      merged.affiliates[user.id] = {
+        userId: user.id,
+        status: "NONE",
+        whatsapp: "",
+        referralCode: "",
+        totalCpa: 0,
+        referredDepositors: 0,
+        depositorsCredited: [],
+        approvedAt: 0,
+        rejectedAt: 0,
+      };
+    } else {
+      const affiliate = merged.affiliates[user.id];
+      affiliate.userId = user.id;
+      affiliate.status = String(affiliate.status || "NONE");
+      affiliate.whatsapp = String(affiliate.whatsapp || "");
+      affiliate.referralCode = String(affiliate.referralCode || "");
+      affiliate.totalCpa = formatMoney(Number(affiliate.totalCpa || 0));
+      affiliate.referredDepositors = Number(affiliate.referredDepositors || 0);
+      affiliate.depositorsCredited = Array.isArray(affiliate.depositorsCredited)
+        ? affiliate.depositorsCredited.map((entry) => String(entry))
+        : [];
+      affiliate.approvedAt = Number(affiliate.approvedAt || 0);
+      affiliate.rejectedAt = Number(affiliate.rejectedAt || 0);
+    }
   }
 
   return merged;
@@ -432,6 +550,7 @@ function creditPaidChargeByTxid(txid, amountHint = 0) {
   charge.credited = true;
   charge.amount = amount;
   markDbDirty();
+  maybeApplyAffiliateReward(ownerId, amount);
 
   recordTransaction(ownerId, {
     category: "deposit",
@@ -1173,6 +1292,131 @@ function getAwardsConfig() {
   return db.settings.awards;
 }
 
+function getContentConfig() {
+  if (!db.settings) db.settings = {};
+  db.settings.content = normalizeContentConfig(db.settings.content);
+  return db.settings.content;
+}
+
+function publicContentPayload() {
+  const content = getContentConfig();
+  return {
+    banners: content.banners,
+    bonusCpa: content.bonusCpa,
+  };
+}
+
+function getAffiliateRecord(userId) {
+  if (!db.affiliates[userId]) {
+    db.affiliates[userId] = {
+      userId,
+      status: "NONE",
+      whatsapp: "",
+      referralCode: "",
+      totalCpa: 0,
+      referredDepositors: 0,
+      depositorsCredited: [],
+      approvedAt: 0,
+      rejectedAt: 0,
+    };
+    markDbDirty();
+  }
+  return db.affiliates[userId];
+}
+
+function randomCode(length = 8) {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let out = "";
+  for (let i = 0; i < length; i += 1) {
+    out += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return out;
+}
+
+function generateUniqueReferralCode() {
+  for (let i = 0; i < 10; i += 1) {
+    const code = randomCode(8);
+    const exists = Object.values(db.affiliates || {}).some((item) => item.referralCode === code);
+    if (!exists) return code;
+  }
+  return `${randomCode(6)}${Date.now().toString().slice(-2)}`;
+}
+
+function findAffiliateByReferralCode(code) {
+  const normalized = String(code || "").trim().toUpperCase();
+  if (!normalized) return null;
+  const entry = Object.values(db.affiliates || {}).find(
+    (item) => String(item.referralCode || "").toUpperCase() === normalized,
+  );
+  return entry || null;
+}
+
+function maybeApplyAffiliateReward(depositorUserId, depositAmount) {
+  const depositor = findUserById(depositorUserId);
+  if (!depositor || depositor.isAdmin) return;
+  const affiliateId = String(depositor.referredByAffiliateId || "");
+  const firstDeposit = Number(depositor.firstDepositAt || 0) <= 0;
+  const normalizedAmount = formatMoney(Number(depositAmount || 0));
+  if (normalizedAmount <= 0) return;
+
+  if (!affiliateId) {
+    if (firstDeposit) {
+      depositor.firstDepositAt = now();
+      markDbDirty();
+    }
+    return;
+  }
+
+  const affiliateUser = findUserById(affiliateId);
+  const affiliateRecord = getAffiliateRecord(affiliateId);
+  if (!affiliateUser || affiliateRecord.status !== "APPROVED") {
+    if (firstDeposit) {
+      depositor.firstDepositAt = now();
+      markDbDirty();
+    }
+    return;
+  }
+
+  let rewardAmount = 0;
+  let eventType = "";
+  let description = "";
+
+  if (firstDeposit) {
+    rewardAmount = Number(getContentConfig().bonusCpa.cpaValue || 0);
+    eventType = "AFFILIATE_CPA_EARNED";
+    description = `CPA por 1º depósito do cliente ${depositor.email}`;
+    if (!affiliateRecord.depositorsCredited.includes(depositorUserId)) {
+      affiliateRecord.referredDepositors = Number(affiliateRecord.referredDepositors || 0) + 1;
+      affiliateRecord.depositorsCredited.push(depositorUserId);
+    }
+    depositor.firstDepositAt = now();
+  } else {
+    const ratePct = Number(getContentConfig().bonusCpa.recurringRatePct || 0);
+    rewardAmount = formatMoney((normalizedAmount * ratePct) / 100);
+    eventType = "AFFILIATE_RECURRING_EARNED";
+    description = `Comissão ${formatMoney(ratePct).toFixed(2)}% do depósito de ${depositor.email}`;
+  }
+
+  if (rewardAmount <= 0) {
+    markDbDirty();
+    return;
+  }
+
+  affiliateRecord.totalCpa = formatMoney(Number(affiliateRecord.totalCpa || 0) + rewardAmount);
+  markDbDirty();
+
+  recordTransaction(affiliateUser.id, {
+    category: "affiliate",
+    eventType,
+    status: "CONFIRMED",
+    amount: rewardAmount,
+    balanceAfter: formatMoney(db.wallets[affiliateUser.id]?.available || 0),
+    referenceId: `AFF-${depositorUserId.slice(0, 8)}`,
+    description,
+    createdAt: now(),
+  });
+}
+
 async function handleApi(req, res, pathname) {
   applyApiCorsHeaders(req, res);
   apiMetrics.totalRequests += 1;
@@ -1236,6 +1480,37 @@ async function handleApi(req, res, pathname) {
     return;
   }
 
+  if (pathname === "/api/content" && req.method === "GET") {
+    const auth = requireAuth(req, res);
+    if (!auth) return;
+    sendJson(res, 200, publicContentPayload());
+    return;
+  }
+
+  if (pathname === "/api/admin/content" && req.method === "GET") {
+    const auth = requireAuth(req, res, { adminOnly: true });
+    if (!auth) return;
+    sendJson(res, 200, publicContentPayload());
+    return;
+  }
+
+  if (pathname === "/api/admin/content" && req.method === "PUT") {
+    const auth = requireAuth(req, res, { adminOnly: true });
+    if (!auth) return;
+
+    try {
+      const body = await readJsonBody(req);
+      const next = normalizeContentConfig(body || {});
+      db.settings = db.settings || {};
+      db.settings.content = next;
+      markDbDirty();
+      sendJson(res, 200, publicContentPayload());
+    } catch {
+      sendJson(res, 400, { error: "Payload inválido para conteúdo." });
+    }
+    return;
+  }
+
   if (pathname === "/api/auth/register" && req.method === "POST") {
     try {
       const body = await readJsonBody(req);
@@ -1245,6 +1520,7 @@ async function handleApi(req, res, pathname) {
       const cpf = onlyDigits(body.cpf);
       const pixKey = String(body.pixKey || "").trim();
       const address = String(body.address || "").trim();
+      const referralCode = String(body.referralCode || "").trim();
 
       const validationError = validateUserProfileData({ name, email, cpf, pixKey, address });
       if (validationError) {
@@ -1271,10 +1547,19 @@ async function handleApi(req, res, pathname) {
         address,
         isAdmin: false,
         isActive: true,
+        referredByAffiliateId: "",
+        firstDepositAt: 0,
         createdAt: now(),
       };
+      if (referralCode) {
+        const affiliate = findAffiliateByReferralCode(referralCode);
+        if (affiliate && affiliate.userId && affiliate.userId !== userId) {
+          user.referredByAffiliateId = affiliate.userId;
+        }
+      }
       db.users.push(user);
       ensureWallet(userId);
+      getAffiliateRecord(userId);
       markDbDirty();
 
       const token = createAuthToken(user.id);
@@ -1359,6 +1644,127 @@ async function handleApi(req, res, pathname) {
       sendJson(res, 200, publicUser(auth.user));
     } catch {
       sendJson(res, 400, { error: "Payload inválido para perfil." });
+    }
+    return;
+  }
+
+  if (pathname === "/api/support/tickets" && req.method === "GET") {
+    const auth = requireAuth(req, res);
+    if (!auth) return;
+    const rows = db.supportTickets
+      .filter((item) => item.userId === auth.user.id)
+      .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+    sendJson(res, 200, rows);
+    return;
+  }
+
+  if (pathname === "/api/support/tickets" && req.method === "POST") {
+    const auth = requireAuth(req, res);
+    if (!auth) return;
+    try {
+      const body = await readJsonBody(req);
+      const whatsapp = onlyDigits(body.whatsapp);
+      const message = String(body.message || "").trim();
+      if (!whatsapp || whatsapp.length < 10) {
+        sendJson(res, 400, { error: "Informe um WhatsApp válido." });
+        return;
+      }
+      if (message.length < 10) {
+        sendJson(res, 400, { error: "Descreva melhor o problema (mínimo 10 caracteres)." });
+        return;
+      }
+
+      const ticket = {
+        ticketId: randomId(),
+        userId: auth.user.id,
+        userName: auth.user.name,
+        userEmail: auth.user.email,
+        whatsapp,
+        message,
+        status: "OPEN",
+        createdAt: now(),
+      };
+      db.supportTickets.unshift(ticket);
+      markDbDirty();
+      sendJson(res, 201, ticket);
+    } catch {
+      sendJson(res, 400, { error: "Payload inválido para suporte." });
+    }
+    return;
+  }
+
+  if (pathname === "/api/admin/support/tickets" && req.method === "GET") {
+    const auth = requireAuth(req, res, { adminOnly: true });
+    if (!auth) return;
+    const rows = [...db.supportTickets].sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+    sendJson(res, 200, rows);
+    return;
+  }
+
+  if (pathname === "/api/affiliates/me" && req.method === "GET") {
+    const auth = requireAuth(req, res);
+    if (!auth) return;
+    const affiliate = getAffiliateRecord(auth.user.id);
+    const pending = db.affiliateApplications
+      .filter((item) => item.userId === auth.user.id)
+      .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))[0] || null;
+    sendJson(res, 200, {
+      status: affiliate.status,
+      whatsapp: affiliate.whatsapp || "",
+      referralCode: affiliate.referralCode || "",
+      totalCpa: formatMoney(affiliate.totalCpa || 0),
+      referredDepositors: Number(affiliate.referredDepositors || 0),
+      pendingApplication: pending,
+      cpaValue: Number(getContentConfig().bonusCpa.cpaValue || 0),
+      recurringRatePct: Number(getContentConfig().bonusCpa.recurringRatePct || 0),
+    });
+    return;
+  }
+
+  if (pathname === "/api/affiliates/apply" && req.method === "POST") {
+    const auth = requireAuth(req, res);
+    if (!auth) return;
+    try {
+      const body = await readJsonBody(req);
+      const whatsapp = onlyDigits(body.whatsapp);
+      if (!whatsapp || whatsapp.length < 10) {
+        sendJson(res, 400, { error: "Informe um WhatsApp válido para afiliação." });
+        return;
+      }
+
+      const affiliate = getAffiliateRecord(auth.user.id);
+      if (affiliate.status === "APPROVED") {
+        sendJson(res, 400, { error: "Conta já aprovada como afiliado." });
+        return;
+      }
+
+      const hasPending = db.affiliateApplications.some(
+        (item) => item.userId === auth.user.id && item.status === "PENDING",
+      );
+      if (hasPending) {
+        sendJson(res, 400, { error: "Já existe solicitação pendente para essa conta." });
+        return;
+      }
+
+      const request = {
+        requestId: randomId(),
+        userId: auth.user.id,
+        userName: auth.user.name,
+        userEmail: auth.user.email,
+        whatsapp,
+        status: "PENDING",
+        createdAt: now(),
+        reviewedAt: 0,
+        reviewedBy: "",
+        reason: "",
+      };
+      db.affiliateApplications.unshift(request);
+      affiliate.status = "PENDING";
+      affiliate.whatsapp = whatsapp;
+      markDbDirty();
+      sendJson(res, 201, request);
+    } catch {
+      sendJson(res, 400, { error: "Payload inválido para solicitação de afiliado." });
     }
     return;
   }
@@ -1470,6 +1876,7 @@ async function handleApi(req, res, pathname) {
         wallet.available = formatMoney(Number(wallet.available || 0) + amount);
         existingCharge.credited = true;
         existingCharge.status = "PAID";
+        maybeApplyAffiliateReward(auth.user.id, amount);
         markDbDirty();
 
         recordTransaction(auth.user.id, {
@@ -1515,16 +1922,18 @@ async function handleApi(req, res, pathname) {
         return;
       }
 
-      if (!Number.isFinite(amount) || amount <= 0) {
-        sendJson(res, 400, { error: "Valor de saque inválido." });
+      if (!Number.isFinite(amount) || amount < MIN_WITHDRAW_AMOUNT) {
+        sendJson(res, 400, { error: `Valor de saque inválido. Mínimo: R$ ${formatMoney(MIN_WITHDRAW_AMOUNT).toFixed(2)}.` });
         return;
       }
-      if (amount > wallet.available) {
+      const feeAmount = formatMoney(amount * WITHDRAW_FEE_RATE);
+      const totalDebit = formatMoney(amount + feeAmount);
+      if (totalDebit > wallet.available) {
         sendJson(res, 400, { error: "Saldo insuficiente para solicitar saque." });
         return;
       }
 
-      wallet.available = formatMoney(wallet.available - amount);
+      wallet.available = formatMoney(wallet.available - totalDebit);
       const request = {
         requestId: randomId(),
         userId: auth.user.id,
@@ -1534,6 +1943,8 @@ async function handleApi(req, res, pathname) {
         pixKey: auth.user.pixKey,
         address: auth.user.address,
         amount: formatMoney(amount),
+        feeAmount,
+        totalDebit,
         status: "PENDING",
         requestedAt: now(),
         processingAt: null,
@@ -1551,10 +1962,10 @@ async function handleApi(req, res, pathname) {
         category: "withdraw",
         eventType: "WITHDRAW_REQUESTED",
         status: "PENDING",
-        amount: -amount,
+        amount: -totalDebit,
         balanceAfter: wallet.available,
         referenceId: request.requestId,
-        description: "Solicitação de saque criada",
+        description: `Solicitação de saque criada (taxa ${formatMoney(WITHDRAW_FEE_RATE * 100).toFixed(2)}%)`,
         createdAt: request.requestedAt,
       });
 
@@ -1832,7 +2243,7 @@ async function handleApi(req, res, pathname) {
       const reason = String(body.reason || "").trim() || "Rejeitado pelo administrador";
       const wallet = ensureWallet(request.userId);
 
-      wallet.available = formatMoney(wallet.available + Number(request.amount || 0));
+      wallet.available = formatMoney(wallet.available + Number(request.totalDebit || request.amount || 0));
       request.status = "REJECTED";
       request.rejectedAt = now();
       request.rejectedBy = auth.user.id;
@@ -1843,7 +2254,7 @@ async function handleApi(req, res, pathname) {
         category: "withdraw",
         eventType: "WITHDRAW_REJECTED_REFUND",
         status: "CONFIRMED",
-        amount: Number(request.amount || 0),
+        amount: Number(request.totalDebit || request.amount || 0),
         balanceAfter: wallet.available,
         referenceId: request.requestId,
         description: `Saque rejeitado e valor estornado. Motivo: ${reason}`,
@@ -1952,6 +2363,73 @@ async function handleApi(req, res, pathname) {
     return;
   }
 
+  if (pathname === "/api/admin/affiliates/applications" && req.method === "GET") {
+    const auth = requireAuth(req, res, { adminOnly: true });
+    if (!auth) return;
+    const rows = [...db.affiliateApplications].sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+    sendJson(res, 200, rows);
+    return;
+  }
+
+  if (/^\/api\/admin\/affiliates\/applications\/[^/]+\/approve$/.test(pathname) && req.method === "POST") {
+    const auth = requireAuth(req, res, { adminOnly: true });
+    if (!auth) return;
+
+    const requestId = decodeURIComponent(pathname.split("/")[5] || "");
+    const request = db.affiliateApplications.find((item) => item.requestId === requestId);
+    if (!request) {
+      sendJson(res, 404, { error: "Solicitação de afiliado não encontrada." });
+      return;
+    }
+
+    const affiliate = getAffiliateRecord(request.userId);
+    affiliate.status = "APPROVED";
+    affiliate.whatsapp = request.whatsapp || affiliate.whatsapp || "";
+    if (!affiliate.referralCode) {
+      affiliate.referralCode = generateUniqueReferralCode();
+    }
+    affiliate.approvedAt = now();
+    affiliate.rejectedAt = 0;
+
+    request.status = "APPROVED";
+    request.reviewedAt = now();
+    request.reviewedBy = auth.user.id;
+    request.reason = "";
+    markDbDirty();
+    sendJson(res, 200, request);
+    return;
+  }
+
+  if (/^\/api\/admin\/affiliates\/applications\/[^/]+\/reject$/.test(pathname) && req.method === "POST") {
+    const auth = requireAuth(req, res, { adminOnly: true });
+    if (!auth) return;
+
+    const requestId = decodeURIComponent(pathname.split("/")[5] || "");
+    const request = db.affiliateApplications.find((item) => item.requestId === requestId);
+    if (!request) {
+      sendJson(res, 404, { error: "Solicitação de afiliado não encontrada." });
+      return;
+    }
+
+    try {
+      const body = await readJsonBody(req);
+      const reason = String(body.reason || "").trim() || "Solicitação rejeitada pelo admin.";
+      const affiliate = getAffiliateRecord(request.userId);
+      affiliate.status = "REJECTED";
+      affiliate.rejectedAt = now();
+
+      request.status = "REJECTED";
+      request.reviewedAt = now();
+      request.reviewedBy = auth.user.id;
+      request.reason = reason;
+      markDbDirty();
+      sendJson(res, 200, request);
+    } catch {
+      sendJson(res, 400, { error: "Payload inválido para rejeição de afiliado." });
+    }
+    return;
+  }
+
   if (pathname === "/api/admin/pix-config/status" && req.method === "GET") {
     if (!canAccessAdminConfig(req)) {
       sendJson(res, 401, { error: "Acesso negado ao painel de configuração Pix." });
@@ -2056,8 +2534,8 @@ async function handleApi(req, res, pathname) {
       const body = await readJsonBody(req);
       const amount = Number(body.amount);
 
-      if (!Number.isFinite(amount) || amount < 1 || amount > 500000) {
-        sendJson(res, 400, { error: "Valor inválido para cobrança Pix." });
+      if (!Number.isFinite(amount) || amount < MIN_DEPOSIT_AMOUNT || amount > 500000) {
+        sendJson(res, 400, { error: `Valor inválido para cobrança Pix. Mínimo: R$ ${formatMoney(MIN_DEPOSIT_AMOUNT).toFixed(2)}.` });
         return;
       }
 

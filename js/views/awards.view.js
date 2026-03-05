@@ -1,4 +1,6 @@
 import { getAwardsConfig } from "../api/awards.adapter.js";
+import { getContentConfig } from "../api/content.adapter.js";
+import { renderBannerBlock } from "../components/banner.js";
 import { listMyWithdrawals } from "../api/profile.adapter.js";
 import { formatCurrency } from "../store.js";
 
@@ -12,7 +14,11 @@ function escapeHtml(value) {
 }
 
 export async function renderAwardsView(container) {
-  const [withdrawals, awardsConfig] = await Promise.all([listMyWithdrawals(), getAwardsConfig()]);
+  const [withdrawals, awardsConfig, contentConfig] = await Promise.all([
+    listMyWithdrawals(),
+    getAwardsConfig(),
+    getContentConfig(),
+  ]);
   const AWARDS = [...awardsConfig].sort((a, b) => Number(a.goal) - Number(b.goal));
   const totalPaidWithdrawals = withdrawals
     .filter((item) => item.status === "PAID")
@@ -22,6 +28,7 @@ export async function renderAwardsView(container) {
 
   container.innerHTML = `
     <section class="main-content anim-fade-up">
+      ${renderBannerBlock(contentConfig, "awards_before_progress")}
       <article class="section-card awards-progress-card">
         <div class="section-header">
           <h3>Premiações por Saques</h3>

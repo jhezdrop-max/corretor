@@ -67,7 +67,7 @@ Arquivo: `js/config.js`
 
 - `API_MODE`: `"mock"` (padrão) ou `"real"`
 - `PIX_MODE`: `"mock"` (padrão) ou `"proxy"`
-- `ENDPOINTS`: URLs base para auth, wallet, trades e pix
+- `ENDPOINTS`: URLs base para auth, wallet, trades, pix, awards e admin
 
 ### Contratos de adapters
 
@@ -106,6 +106,8 @@ Arquivo: `js/config.js`
   - `payWithdrawRequest({ requestId })` (fecha como PAID)
   - `rejectWithdrawRequest({ requestId, reason })` (fecha como REJECTED + estorno)
   - `listAllClientTransactions()`
+  - `getAwardsConfigAdmin()`
+  - `updateAwardsConfigAdmin({ awards })`
 
 Para integrar API real:
 
@@ -157,8 +159,8 @@ Existe um bloco no `Painel Admin` para configurar API Pix:
 - Product title
 - Token Pix (campo oculto)
 
-Essa configuração é salva apenas em memória no backend (runtime).  
-Ao reiniciar o processo Node, o valor em runtime é perdido e volta para o `.env`.
+Essa configuração agora é salva no backend (arquivo local do servidor) e permanece após restart.
+Para ambiente Railway, configure volume persistente e `DB_FILE_PATH` (ex.: `/data/byetrader-db.json`) para não perder dados em novo deploy.
 
 Se você definir `ADMIN_PANEL_SECRET` no `.env`, o painel exige esse segredo para salvar/ler status da configuração Pix.
 
@@ -241,6 +243,7 @@ PIX_OFFER_HASH=sq9iw
 PIX_PRODUCT_HASH=SEU_PRODUCT_HASH
 PIX_PRODUCT_TITLE=Deposito Bye Trader
 PIX_PRODUCT_SALE_PAGE=https://byeptrader.com
+DB_FILE_PATH=/data/byetrader-db.json
 ```
 
 Depois do deploy, você terá uma URL como:

@@ -1,7 +1,9 @@
 import { APP_CONFIG } from "../config.js";
+import { getContentConfig } from "../api/content.adapter.js";
 import { getLiveTicker } from "../api/market.adapter.js";
 import { createTrade, listTrades, resolveTrade } from "../api/trade.adapter.js";
 import { getBalance } from "../api/wallet.adapter.js";
+import { renderBannerBlock } from "../components/banner.js";
 import { formatCurrency, formatDateTime } from "../store.js";
 import { showToast } from "../components/toast.js";
 import { updateHeaderBalance } from "../components/header.js";
@@ -194,6 +196,7 @@ function clamp(value, min, max) {
 }
 
 export async function renderTradeView(container) {
+  let contentConfig = await getContentConfig();
   let wallet = await getBalance();
   let trades = await listTrades();
   let selectedSymbolCode = APP_CONFIG.symbols[0].code;
@@ -317,6 +320,8 @@ export async function renderTradeView(container) {
           <div id="trade-message" class="hidden" style="margin-top:1rem;"></div>
         </article>
       </div>
+
+      ${renderBannerBlock(contentConfig, "trade_before_history")}
 
       <article class="section-card">
         <div class="section-header">

@@ -1,4 +1,6 @@
 import { createPixCharge, getPixChargeStatus } from "../api/pix.adapter.js";
+import { getContentConfig } from "../api/content.adapter.js";
+import { renderBannerBlock } from "../components/banner.js";
 import { applyDeposit, getBalance } from "../api/wallet.adapter.js";
 import { formatCurrency, formatDateTime } from "../store.js";
 import { showToast } from "../components/toast.js";
@@ -19,7 +21,7 @@ export async function renderDepositView(container) {
   let charge = null;
   let countdownTimer = null;
 
-  const wallet = await getBalance();
+  const [wallet, contentConfig] = await Promise.all([getBalance(), getContentConfig()]);
 
   container.innerHTML = `
     <section class="main-content anim-fade-up">
@@ -32,11 +34,12 @@ export async function renderDepositView(container) {
         <form id="deposit-form" class="form-grid" style="max-width: 420px;">
           <div class="field">
             <label for="deposit-amount">Valor do depósito (R$)</label>
-            <input class="input" id="deposit-amount" type="number" min="10" step="0.01" placeholder="100.00" required />
+            <input class="input" id="deposit-amount" type="number" min="30" step="0.01" placeholder="100.00" required />
           </div>
           <button class="btn btn-primary" type="submit">Gerar Cobrança Pix</button>
-          <p class="help-text">API Pix: ponto de integração em <span class="mono">createPixCharge()</span> e <span class="mono">getPixChargeStatus()</span>.</p>
+          <p class="help-text">Depósito mínimo: R$ 30,00. API Pix: <span class="mono">createPixCharge()</span> e <span class="mono">getPixChargeStatus()</span>.</p>
         </form>
+        ${renderBannerBlock(contentConfig, "deposit_after_generate")}
 
         <div id="deposit-message" class="hidden" style="margin-top:1rem;"></div>
       </div>
@@ -60,15 +63,9 @@ export async function renderDepositView(container) {
       return;
     }
 
-    const fallbackPaymentUrl =
-      String(charge.paymentUrl || "").trim() ||
-      (String(charge.txid || "").trim()
-        ? `https://go.tribopay.com.br/${encodeURIComponent(String(charge.txid).trim())}`
-        : "");
     resultBox.classList.remove("hidden");
     const hasCopyCode = Boolean(String(charge.copyPaste || "").trim());
     const hasQrImage = Boolean(String(charge.qrCodeBase64 || "").trim());
-    const hasPaymentUrl = Boolean(String(fallbackPaymentUrl || "").trim());
     resultBox.innerHTML = `
       <div class="section-header">
         <h3>Cobrança ${charge.txid}</h3>
@@ -89,14 +86,13 @@ export async function renderDepositView(container) {
           </div>
           ${
             !hasCopyCode
-              ? '<div class="info-box">A API não retornou código Pix EMV. Use o botão de pagamento abaixo e confirme no \"Já paguei\".</div>'
+              ? '<div class="info-box">A API não retornou código Pix EMV para copiar. Confirme no botão "Já paguei" após efetuar o pagamento no seu banco.</div>'
               : ""
           }
           <div class="help-text">Valor: ${formatCurrency(charge.amount)} | Expira em: <strong id="pix-countdown" class="mono">${formatCountdown(charge.expiresAt)}</strong></div>
           <div class="help-text">Criado em: ${formatDateTime(charge.createdAt)}</div>
           <div class="inline-actions">
             <button class="btn btn-secondary" id="pix-copy-btn">Copiar Código</button>
-            ${hasPaymentUrl ? `<a class="btn btn-secondary" href="${fallbackPaymentUrl}" target="_blank" rel="noopener noreferrer">Abrir Pagamento</a>` : ""}
             <button class="btn btn-primary" id="pix-check-btn">Já paguei</button>
           </div>
         </div>
@@ -176,8 +172,8 @@ export async function renderDepositView(container) {
 
     const amount = Number(container.querySelector("#deposit-amount").value);
 
-    if (!amount || amount < 10) {
-      showMessage("O valor mínimo para depósito é R$ 10,00.");
+    if (!amount || amount < 30) {
+      showMessage("O valor mínimo para depósito é R$ 30,00.");
       return;
     }
 

@@ -5,6 +5,7 @@ js/config.local.js
 backups/
 backup-byetrader-*.tar.gz
 env-backup-*.txt
+data/
 
 # OS/editor
 .DS_Store

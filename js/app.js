@@ -9,8 +9,10 @@ import { renderAuthView } from "./views/auth.view.js";
 import { renderAccountView } from "./views/account.view.js";
 import { renderAdminView } from "./views/admin.view.js";
 import { renderAwardsView } from "./views/awards.view.js";
+import { renderBonusCpaView } from "./views/bonus-cpa.view.js";
 import { renderDashboardView } from "./views/dashboard.view.js";
 import { renderDepositView } from "./views/deposit.view.js";
+import { renderSupportView } from "./views/support.view.js";
 import { renderTradeView } from "./views/trade.view.js";
 
 const app = document.getElementById("app");
@@ -31,7 +33,16 @@ function cleanupCurrentView() {
 }
 
 function protectedRoute(route) {
-  return route === "/dashboard" || route === "/awards" || route === "/deposit" || route === "/trade" || route === "/account" || route === "/admin";
+  return (
+    route === "/dashboard" ||
+    route === "/awards" ||
+    route === "/deposit" ||
+    route === "/trade" ||
+    route === "/account" ||
+    route === "/support" ||
+    route === "/bonus-cpa" ||
+    route === "/admin"
+  );
 }
 
 async function renderRoute(route) {
@@ -115,6 +126,16 @@ async function renderRoute(route) {
 
   if (route === "/account") {
     currentCleanup = await renderAccountView(content, { navigate });
+    return;
+  }
+
+  if (route === "/support") {
+    currentCleanup = await renderSupportView(content, { navigate });
+    return;
+  }
+
+  if (route === "/bonus-cpa") {
+    currentCleanup = await renderBonusCpaView(content, { navigate });
     return;
   }
 

@@ -49,6 +49,9 @@ function clearFailedAttempts() {
 }
 
 export function renderAuthView(container, { navigate }) {
+  const hashQuery = window.location.hash.includes("?") ? window.location.hash.split("?")[1] : "";
+  const referralFromUrl =
+    new URLSearchParams(window.location.search).get("ref") || new URLSearchParams(hashQuery).get("ref") || "";
   container.className = "auth-page";
   container.innerHTML = `
     <section class="auth-card anim-fade-up">
@@ -95,6 +98,10 @@ export function renderAuthView(container, { navigate }) {
         <div class="field">
           <label for="register-address">Endereço residencial</label>
           <input class="input" id="register-address" type="text" required />
+        </div>
+        <div class="field">
+          <label for="register-referral">Código de indicação (opcional)</label>
+          <input class="input mono" id="register-referral" type="text" value="${referralFromUrl}" />
         </div>
         <div class="field">
           <label for="register-password">Senha</label>
@@ -187,6 +194,7 @@ export function renderAuthView(container, { navigate }) {
     const cpf = onlyDigits(container.querySelector("#register-cpf").value);
     const pixKey = container.querySelector("#register-pix").value.trim();
     const address = container.querySelector("#register-address").value.trim();
+    const referralCode = container.querySelector("#register-referral").value.trim();
     const password = container.querySelector("#register-password").value.trim();
     const confirm = container.querySelector("#register-password-confirm").value.trim();
     const termsAccepted = container.querySelector("#register-terms").checked;
@@ -227,7 +235,7 @@ export function renderAuthView(container, { navigate }) {
     }
 
     try {
-      const session = await register({ name, email, cpf, pixKey, address, password });
+      const session = await register({ name, email, cpf, pixKey, address, password, referralCode });
       setSession(session);
       showMessage("Cadastro concluído. Redirecionando...", "success");
       showToast("Conta criada com sucesso.", "success");

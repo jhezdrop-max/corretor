@@ -2,13 +2,19 @@ import {
   approveWithdrawRequest,
   getPlatformStats,
   getPixConfigStatus,
+  getContentConfigAdmin,
   getAwardsConfigAdmin,
   listClientAccounts,
+  listSupportTicketsAdmin,
+  listAffiliateApplicationsAdmin,
   listAllClientTransactions,
   listWithdrawRequests,
   payWithdrawRequest,
+  approveAffiliateApplicationAdmin,
+  rejectAffiliateApplicationAdmin,
   rejectWithdrawRequest,
   savePixConfig,
+  updateContentConfigAdmin,
   updateAwardsConfigAdmin,
   updateClientAccount,
 } from "../api/admin.adapter.js";
@@ -44,6 +50,9 @@ export async function renderAdminView(container) {
   let requests = await listWithdrawRequests();
   let transactions = await listAllClientTransactions();
   let clientAccounts = await listClientAccounts();
+  let supportTickets = await listSupportTicketsAdmin();
+  let affiliateApplications = await listAffiliateApplicationsAdmin();
+  let contentConfig = await getContentConfigAdmin();
   let awardsConfig = [];
   let autoRefreshTimer = null;
 
@@ -240,6 +249,37 @@ export async function renderAdminView(container) {
 
       <article class="section-card">
         <div class="section-header">
+          <h3>Banners + Página Bônus e CPA</h3>
+          <small class="help-text">Conteúdo promocional editável pelo admin.</small>
+        </div>
+        <div id="content-admin-message" class="info-box" style="margin-bottom:1rem;">Carregando conteúdo...</div>
+        <div class="grid-2">
+          <div class="field">
+            <label for="bonus-page-title">Título da página</label>
+            <input class="input" id="bonus-page-title" type="text" />
+          </div>
+          <div class="field">
+            <label for="bonus-cpa-value">Valor CPA (R$)</label>
+            <input class="input" id="bonus-cpa-value" type="number" min="0" step="0.01" />
+          </div>
+        </div>
+        <div class="field" style="margin-bottom:1rem;">
+          <label for="bonus-recurring-rate">Percentual nos próximos depósitos (%)</label>
+          <input class="input" id="bonus-recurring-rate" type="number" min="0" step="0.01" />
+        </div>
+        <div class="field" style="margin-bottom:1rem;">
+          <label for="bonus-page-text">Texto da página</label>
+          <textarea class="input" id="bonus-page-text" rows="3"></textarea>
+        </div>
+        <div id="content-banner-list" class="awards-admin-list"></div>
+        <div class="inline-actions" style="margin-top:0.9rem;">
+          <button class="btn btn-primary" type="button" id="content-save-btn">Salvar Conteúdo</button>
+          <button class="btn btn-secondary" type="button" id="content-reload-btn">Recarregar</button>
+        </div>
+      </article>
+
+      <article class="section-card">
+        <div class="section-header">
           <h3>Painel de Saques (Admin)</h3>
           <small class="help-text">Fluxo: PENDING -> PROCESSING -> PAID / REJECTED</small>
         </div>
@@ -253,12 +293,56 @@ export async function renderAdminView(container) {
                 <th>CPF</th>
                 <th>Chave Pix</th>
                 <th>Endereço</th>
-                <th>Valor</th>
+                <th>Valor Líquido</th>
+                <th>Taxa</th>
+                <th>Débito Total</th>
                 <th>Status</th>
                 <th>Ação</th>
               </tr>
             </thead>
             <tbody id="admin-withdraw-tbody"></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="section-card">
+        <div class="section-header">
+          <h3>Solicitações de Afiliados</h3>
+          <small class="help-text">Aprovar ou rejeitar pedidos com WhatsApp.</small>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Data</th>
+                <th>Cliente</th>
+                <th>WhatsApp</th>
+                <th>Status</th>
+                <th>Ação</th>
+              </tr>
+            </thead>
+            <tbody id="admin-affiliates-tbody"></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="section-card">
+        <div class="section-header">
+          <h3>Chamados de Suporte</h3>
+          <small class="help-text">Mensagens enviadas pelos clientes.</small>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Data</th>
+                <th>Cliente</th>
+                <th>WhatsApp</th>
+                <th>Mensagem</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="admin-support-tbody"></tbody>
           </table>
         </div>
       </article>
@@ -281,6 +365,7 @@ export async function renderAdminView(container) {
               <option value="withdraw">withdraw</option>
               <option value="trade">trade</option>
               <option value="admin">admin</option>
+              <option value="affiliate">affiliate</option>
             </select>
           </div>
           <div class="field">
@@ -318,9 +403,13 @@ export async function renderAdminView(container) {
   const tbody = container.querySelector("#admin-withdraw-tbody");
   const transactionsTbody = container.querySelector("#admin-transactions-tbody");
   const clientsTbody = container.querySelector("#admin-clients-tbody");
+  const supportTbody = container.querySelector("#admin-support-tbody");
+  const affiliatesTbody = container.querySelector("#admin-affiliates-tbody");
   const pixStatusNode = container.querySelector("#pix-config-status");
   const awardsNode = container.querySelector("#awards-admin-list");
   const awardsMessageNode = container.querySelector("#awards-admin-message");
+  const contentMessageNode = container.querySelector("#content-admin-message");
+  const bannerListNode = container.querySelector("#content-banner-list");
 
   function setMessage(text, type = "error") {
     message.textContent = text;
@@ -457,6 +546,99 @@ export async function renderAdminView(container) {
     });
   }
 
+  function renderContentEditor() {
+    const slots = [
+      { key: "dashboard_after_awards", label: "Dashboard (abaixo da barra de premiações)" },
+      { key: "awards_before_progress", label: "Premiações (acima da barra de progresso)" },
+      { key: "deposit_after_generate", label: "Depósito Pix (abaixo do botão gerar)" },
+      { key: "trade_before_history", label: "Operações (acima do histórico de operações)" },
+      { key: "bonus_bottom", label: "Bônus e CPA (fim da página)" },
+    ];
+
+    const bonus = contentConfig?.bonusCpa || {};
+    container.querySelector("#bonus-page-title").value = bonus.pageTitle || "";
+    container.querySelector("#bonus-page-text").value = bonus.pageText || "";
+    container.querySelector("#bonus-cpa-value").value = Number(bonus.cpaValue || 20);
+    container.querySelector("#bonus-recurring-rate").value = Number(bonus.recurringRatePct || 20);
+
+    bannerListNode.innerHTML = slots
+      .map((slot, index) => {
+        const banner = contentConfig?.banners?.[slot.key] || {};
+        return `
+          <div class="section-card" style="margin-bottom:0.85rem;">
+            <div class="section-header">
+              <h3>${slot.label}</h3>
+            </div>
+            <div class="field">
+              <label><input type="checkbox" data-banner-enabled="${slot.key}" ${banner.enabled ? "checked" : ""}/> Ativar banner</label>
+            </div>
+            <div class="grid-2">
+              <div class="field">
+                <label>Título</label>
+                <input class="input" data-banner-title="${slot.key}" type="text" value="${escapeHtml(banner.title || "")}" />
+              </div>
+              <div class="field">
+                <label>URL do clique (opcional)</label>
+                <input class="input" data-banner-link="${slot.key}" type="text" value="${escapeHtml(banner.linkUrl || "")}" />
+              </div>
+            </div>
+            <div class="field">
+              <label>Texto</label>
+              <textarea class="input" data-banner-text="${slot.key}" rows="2">${escapeHtml(banner.text || "")}</textarea>
+            </div>
+            <div class="field">
+              <label>URL da imagem</label>
+              <input class="input" data-banner-image="${slot.key}" type="text" value="${escapeHtml(banner.imageUrl || "")}" />
+            </div>
+          </div>
+        `;
+      })
+      .join("");
+  }
+
+  function collectContentFromEditor() {
+    const slots = [
+      "dashboard_after_awards",
+      "awards_before_progress",
+      "deposit_after_generate",
+      "trade_before_history",
+      "bonus_bottom",
+    ];
+    const banners = {};
+    slots.forEach((key) => {
+      banners[key] = {
+        enabled: Boolean(container.querySelector(`[data-banner-enabled="${key}"]`)?.checked),
+        title: container.querySelector(`[data-banner-title="${key}"]`)?.value?.trim() || "",
+        text: container.querySelector(`[data-banner-text="${key}"]`)?.value?.trim() || "",
+        imageUrl: container.querySelector(`[data-banner-image="${key}"]`)?.value?.trim() || "",
+        linkUrl: container.querySelector(`[data-banner-link="${key}"]`)?.value?.trim() || "",
+      };
+    });
+    const cpaRaw = Number(container.querySelector("#bonus-cpa-value").value);
+    const recurringRateRaw = Number(container.querySelector("#bonus-recurring-rate").value);
+    return {
+      banners,
+      bonusCpa: {
+        pageTitle: container.querySelector("#bonus-page-title").value.trim() || "Bônus e CPA",
+        pageText: container.querySelector("#bonus-page-text").value.trim(),
+        cpaValue: Number.isFinite(cpaRaw) && cpaRaw >= 0 ? cpaRaw : 20,
+        recurringRatePct: Number.isFinite(recurringRateRaw) && recurringRateRaw >= 0 ? recurringRateRaw : 20,
+      },
+    };
+  }
+
+  async function loadContentConfig() {
+    try {
+      contentConfig = await getContentConfigAdmin();
+      renderContentEditor();
+      contentMessageNode.className = "success-box";
+      contentMessageNode.textContent = "Conteúdo carregado.";
+    } catch (error) {
+      contentMessageNode.className = "error-box";
+      contentMessageNode.textContent = error.message || "Falha ao carregar conteúdo.";
+    }
+  }
+
   function filteredTransactions() {
     const clientQuery = container.querySelector("#tx-filter-client").value.trim().toLowerCase();
     const category = container.querySelector("#tx-filter-category").value;
@@ -568,20 +750,101 @@ export async function renderAdminView(container) {
       .join("");
   }
 
+  function renderSupportTickets() {
+    if (!supportTickets.length) {
+      supportTbody.innerHTML =
+        '<tr><td colspan="5" style="color:var(--text-2);">Sem chamados de suporte.</td></tr>';
+      return;
+    }
+    supportTbody.innerHTML = supportTickets
+      .map(
+        (item) => `
+          <tr>
+            <td>${formatDateTime(item.createdAt)}</td>
+            <td>${escapeHtml(item.userName)}<br/><small style="color:var(--text-2)">${escapeHtml(item.userEmail)}</small></td>
+            <td class="mono">${escapeHtml(item.whatsapp || "-")}</td>
+            <td>${escapeHtml(item.message || "-")}</td>
+            <td>${txBadge(item.status || "OPEN")}</td>
+          </tr>
+        `,
+      )
+      .join("");
+  }
+
+  function renderAffiliateApplications() {
+    if (!affiliateApplications.length) {
+      affiliatesTbody.innerHTML =
+        '<tr><td colspan="5" style="color:var(--text-2);">Sem solicitações de afiliado.</td></tr>';
+      return;
+    }
+    affiliatesTbody.innerHTML = affiliateApplications
+      .map(
+        (item) => `
+          <tr>
+            <td>${formatDateTime(item.createdAt)}</td>
+            <td>${escapeHtml(item.userName)}<br/><small style="color:var(--text-2)">${escapeHtml(item.userEmail)}</small></td>
+            <td class="mono">${escapeHtml(item.whatsapp || "-")}</td>
+            <td>${txBadge(item.status || "PENDING")}</td>
+            <td>
+              ${
+                item.status === "PENDING"
+                  ? `<button class="btn btn-success" data-aff-approve="${item.requestId}">Aprovar</button>
+                     <button class="btn btn-danger" data-aff-reject="${item.requestId}">Rejeitar</button>`
+                  : `<small>${escapeHtml(item.reason || "-")}</small>`
+              }
+            </td>
+          </tr>
+        `,
+      )
+      .join("");
+
+    affiliatesTbody.querySelectorAll("[data-aff-approve]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        try {
+          await approveAffiliateApplicationAdmin({ requestId: button.dataset.affApprove });
+          affiliateApplications = await listAffiliateApplicationsAdmin();
+          renderAffiliateApplications();
+          showToast("Afiliado aprovado.", "success");
+        } catch (error) {
+          setMessage(error.message || "Falha ao aprovar afiliado.");
+        }
+      });
+    });
+
+    affiliatesTbody.querySelectorAll("[data-aff-reject]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const reason = window.prompt("Motivo da rejeição:", "Requisitos não atendidos");
+        if (reason === null) return;
+        try {
+          await rejectAffiliateApplicationAdmin({ requestId: button.dataset.affReject, reason });
+          affiliateApplications = await listAffiliateApplicationsAdmin();
+          renderAffiliateApplications();
+          showToast("Afiliado rejeitado.", "success");
+        } catch (error) {
+          setMessage(error.message || "Falha ao rejeitar afiliado.");
+        }
+      });
+    });
+  }
+
   async function refreshData() {
     stats = await getPlatformStats();
     requests = await listWithdrawRequests();
     transactions = await listAllClientTransactions();
     clientAccounts = await listClientAccounts();
+    supportTickets = await listSupportTicketsAdmin();
+    affiliateApplications = await listAffiliateApplicationsAdmin();
     renderStats();
     renderTable();
     renderTransactions();
     renderClientAccounts();
+    renderSupportTickets();
+    renderAffiliateApplications();
   }
 
   function renderTable() {
     if (!requests.length) {
-      tbody.innerHTML = `<tr><td colspan="8" style="color:var(--text-2);">Sem solicitações de saque.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="10" style="color:var(--text-2);">Sem solicitações de saque.</td></tr>`;
       return;
     }
 
@@ -595,6 +858,8 @@ export async function renderAdminView(container) {
             <td class="mono">${escapeHtml(item.pixKey)}</td>
             <td>${escapeHtml(item.address || "-")}</td>
             <td class="mono">${formatCurrency(item.amount)}</td>
+            <td class="mono">${formatCurrency(item.feeAmount || 0)}</td>
+            <td class="mono">${formatCurrency(item.totalDebit || item.amount)}</td>
             <td>${badge(item.status)}</td>
             <td>
               ${renderActions(item)}
@@ -791,6 +1056,20 @@ export async function renderAdminView(container) {
       awardsMessageNode.textContent = error.message || "Falha ao salvar premiações.";
     }
   });
+  container.querySelector("#content-reload-btn").addEventListener("click", loadContentConfig);
+  container.querySelector("#content-save-btn").addEventListener("click", async () => {
+    const next = collectContentFromEditor();
+    try {
+      contentConfig = await updateContentConfigAdmin({ content: next });
+      renderContentEditor();
+      contentMessageNode.className = "success-box";
+      contentMessageNode.textContent = "Conteúdo salvo com sucesso.";
+      showToast("Banners e CPA atualizados.", "success");
+    } catch (error) {
+      contentMessageNode.className = "error-box";
+      contentMessageNode.textContent = error.message || "Falha ao salvar conteúdo.";
+    }
+  });
   container.querySelector("#admin-refresh-data-btn")?.addEventListener("click", async () => {
     try {
       await refreshData();
@@ -854,8 +1133,11 @@ export async function renderAdminView(container) {
   renderTable();
   renderTransactions();
   renderClientAccounts();
+  renderSupportTickets();
+  renderAffiliateApplications();
   await refreshPixStatus();
   await loadAwardsConfig();
+  await loadContentConfig();
   await refreshMetrics();
 
   return () => {

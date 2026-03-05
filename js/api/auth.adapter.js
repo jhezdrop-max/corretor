@@ -12,12 +12,12 @@ function fakeToken() {
   return `mock-${randomId()}`;
 }
 
-export async function register({ name, email, password, cpf, pixKey, address }) {
+export async function register({ name, email, password, cpf, pixKey, address, referralCode = "" }) {
   if (API_MODE === "real") {
     const response = await fetch(`${ENDPOINTS.auth}/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, email, password, cpf, pixKey, address }),
+      body: JSON.stringify({ name, email, password, cpf, pixKey, address, referralCode }),
     });
 
     if (!response.ok) {

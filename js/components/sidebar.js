@@ -4,6 +4,8 @@ const BASE_ITEMS = [
   { route: "/deposit", label: "Depósito Pix" },
   { route: "/trade", label: "Operações" },
   { route: "/account", label: "Conta & Saques" },
+  { route: "/support", label: "Suporte" },
+  { route: "/bonus-cpa", label: "Bônus e CPA" },
 ];
 
 export function renderSidebar(currentRoute, session) {

@@ -355,3 +355,111 @@ export async function updateAwardsConfigAdmin({ awards }) {
 
   return awards;
 }
+
+export async function getContentConfigAdmin() {
+  const session = requireSession();
+  ensureAdmin(session);
+
+  if (API_MODE === "real") {
+    const response = await fetch(`${ENDPOINTS.admin}/content`, {
+      headers: {
+        Authorization: `Bearer ${session.token}`,
+      },
+    });
+    if (!response.ok) throw new Error("Falha ao carregar conteúdo/banners.");
+    return response.json();
+  }
+  return {
+    banners: {},
+    bonusCpa: { pageTitle: "Bônus e CPA", pageText: "", cpaValue: 20, recurringRatePct: 20 },
+  };
+}
+
+export async function updateContentConfigAdmin({ content }) {
+  const session = requireSession();
+  ensureAdmin(session);
+
+  if (API_MODE === "real") {
+    const response = await fetch(`${ENDPOINTS.admin}/content`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.token}`,
+      },
+      body: JSON.stringify(content),
+    });
+    if (!response.ok) throw new Error("Falha ao salvar conteúdo/banners.");
+    return response.json();
+  }
+  return content;
+}
+
+export async function listSupportTicketsAdmin() {
+  const session = requireSession();
+  ensureAdmin(session);
+  if (API_MODE === "real") {
+    const response = await fetch(`${ENDPOINTS.admin}/support/tickets`, {
+      headers: {
+        Authorization: `Bearer ${session.token}`,
+      },
+    });
+    if (!response.ok) throw new Error("Falha ao listar chamados de suporte.");
+    return response.json();
+  }
+  return [];
+}
+
+export async function listAffiliateApplicationsAdmin() {
+  const session = requireSession();
+  ensureAdmin(session);
+  if (API_MODE === "real") {
+    const response = await fetch(`${ENDPOINTS.admin}/affiliates/applications`, {
+      headers: {
+        Authorization: `Bearer ${session.token}`,
+      },
+    });
+    if (!response.ok) throw new Error("Falha ao listar solicitações de afiliado.");
+    return response.json();
+  }
+  return [];
+}
+
+export async function approveAffiliateApplicationAdmin({ requestId }) {
+  const session = requireSession();
+  ensureAdmin(session);
+  if (API_MODE === "real") {
+    const response = await fetch(
+      `${ENDPOINTS.admin}/affiliates/applications/${encodeURIComponent(requestId)}/approve`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.token}`,
+        },
+      },
+    );
+    if (!response.ok) throw new Error("Falha ao aprovar afiliado.");
+    return response.json();
+  }
+  return { requestId, status: "APPROVED" };
+}
+
+export async function rejectAffiliateApplicationAdmin({ requestId, reason }) {
+  const session = requireSession();
+  ensureAdmin(session);
+  if (API_MODE === "real") {
+    const response = await fetch(
+      `${ENDPOINTS.admin}/affiliates/applications/${encodeURIComponent(requestId)}/reject`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.token}`,
+        },
+        body: JSON.stringify({ reason }),
+      },
+    );
+    if (!response.ok) throw new Error("Falha ao rejeitar afiliado.");
+    return response.json();
+  }
+  return { requestId, status: "REJECTED", reason };
+}

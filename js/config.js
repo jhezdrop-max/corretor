@@ -10,6 +10,9 @@ const defaultEndpoints = {
   pix: "/api/pix",
   awards: "/api/awards",
   admin: "/api/admin",
+  content: "/api/content",
+  support: "/api/support",
+  affiliates: "/api/affiliates",
 };
 
 export const ENDPOINTS = {

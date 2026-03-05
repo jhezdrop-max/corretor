@@ -69,10 +69,10 @@ export async function renderAccountView(container) {
           <form id="withdraw-form" class="form-grid">
             <div class="field">
               <label for="withdraw-amount">Valor do saque (R$)</label>
-              <input class="input" id="withdraw-amount" type="number" min="10" step="0.01" required />
+              <input class="input" id="withdraw-amount" type="number" min="80" step="0.01" required />
             </div>
             <button class="btn btn-secondary" type="submit">Pedir Saque</button>
-            <div class="help-text">O saque entra como PENDING e precisa de validação do admin.</div>
+            <div class="help-text">Mínimo R$ 80,00. Taxa de saque: 8,9%.</div>
             <div id="withdraw-message" class="hidden"></div>
           </form>
         </article>
@@ -88,7 +88,9 @@ export async function renderAccountView(container) {
             <thead>
               <tr>
                 <th>Data</th>
-                <th>Valor</th>
+                <th>Valor Líquido</th>
+                <th>Taxa</th>
+                <th>Débito Total</th>
                 <th>Status</th>
                 <th>Finalizado em</th>
                 <th>Motivo</th>
@@ -112,6 +114,7 @@ export async function renderAccountView(container) {
               <option value="deposit">deposit</option>
               <option value="withdraw">withdraw</option>
               <option value="trade">trade</option>
+              <option value="affiliate">affiliate</option>
             </select>
           </div>
           <div class="field">
@@ -161,7 +164,7 @@ export async function renderAccountView(container) {
 
   function renderWithdrawTable() {
     if (!withdrawals.length) {
-      withdrawTbody.innerHTML = `<tr><td colspan="5" style="color:var(--text-2);">Nenhum saque solicitado.</td></tr>`;
+      withdrawTbody.innerHTML = `<tr><td colspan="7" style="color:var(--text-2);">Nenhum saque solicitado.</td></tr>`;
       return;
     }
 
@@ -171,6 +174,8 @@ export async function renderAccountView(container) {
           <tr>
             <td>${formatDateTime(item.requestedAt)}</td>
             <td class="mono">${formatCurrency(item.amount)}</td>
+            <td class="mono">${formatCurrency(item.feeAmount || 0)}</td>
+            <td class="mono">${formatCurrency(item.totalDebit || item.amount)}</td>
             <td>${statusBadge(item.status)}</td>
             <td>${item.approvedAt ? formatDateTime(item.approvedAt) : item.rejectedAt ? formatDateTime(item.rejectedAt) : "-"}</td>
             <td>${item.rejectReason || "-"}</td>
@@ -278,8 +283,8 @@ export async function renderAccountView(container) {
     event.preventDefault();
 
     const amount = Number(container.querySelector("#withdraw-amount").value);
-    if (!amount || amount < 10) {
-      setMessage(withdrawMessage, "Valor mínimo para saque: R$ 10,00.");
+    if (!amount || amount < 80) {
+      setMessage(withdrawMessage, "Valor mínimo para saque: R$ 80,00.");
       return;
     }
 

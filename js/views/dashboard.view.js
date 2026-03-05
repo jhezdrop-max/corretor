@@ -1,15 +1,18 @@
 import { getAwardsConfig } from "../api/awards.adapter.js";
+import { getContentConfig } from "../api/content.adapter.js";
+import { renderBannerBlock } from "../components/banner.js";
 import { getBalance } from "../api/wallet.adapter.js";
 import { listTrades } from "../api/trade.adapter.js";
 import { formatCurrency } from "../store.js";
 import { listMyWithdrawals } from "../api/profile.adapter.js";
 
 export async function renderDashboardView(container, { navigate }) {
-  const [wallet, trades, withdrawals, awards] = await Promise.all([
+  const [wallet, trades, withdrawals, awards, contentConfig] = await Promise.all([
     getBalance(),
     listTrades(),
     listMyWithdrawals(),
     getAwardsConfig(),
+    getContentConfig(),
   ]);
   const AWARD_TIERS = [...awards]
     .map((item) => Number(item.goal || 0))
@@ -49,6 +52,8 @@ export async function renderDashboardView(container, { navigate }) {
           <button class="btn btn-primary" id="dashboard-go-awards">Ver Premiações</button>
         </div>
       </div>
+
+      ${renderBannerBlock(contentConfig, "dashboard_after_awards")}
 
       <div class="grid-3">
         <article class="card-kpi">
