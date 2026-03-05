@@ -808,6 +808,24 @@ function pickString(...values) {
   return "";
 }
 
+function parseProviderTimestamp(value) {
+  if (value === null || value === undefined || value === "") return 0;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    if (value > 1e12) return value;
+    if (value > 1e9) return value * 1000;
+    return 0;
+  }
+
+  const asNumber = Number(value);
+  if (Number.isFinite(asNumber) && asNumber > 0) {
+    if (asNumber > 1e12) return asNumber;
+    if (asNumber > 1e9) return asNumber * 1000;
+  }
+
+  const parsed = new Date(String(value)).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function walkObjectStrings(input, visitor, visited = new Set()) {
   if (!input || typeof input !== "object") return;
   if (visited.has(input)) return;
@@ -924,10 +942,17 @@ function normalizeCreateResponse(providerData, requestedAmount, cfg) {
     source.pix?.copyPaste,
     source.pix?.code,
     source.pix?.copy_paste,
+    source.pix?.copy_and_paste,
+    source.pix?.pix_code,
+    source.pixCode,
+    source.codigo_pix,
+    source.copy_and_paste,
     source.pix?.brcode,
     sourcePix.copyPaste,
     sourcePix.code,
     sourcePix.copy_paste,
+    sourcePix.copy_and_paste,
+    sourcePix.pix_code,
     sourcePix.brcode,
     sourcePix.emv,
     sourcePayment.pix_code,
@@ -984,12 +1009,15 @@ function normalizeCreateResponse(providerData, requestedAmount, cfg) {
   );
 
   const status = tribo ? mapPixStatus(source.status) : source.status || "PENDING";
-  const expiresAt =
+  const expiresAtRaw =
     source.expiresAt ||
     source.expirationDate ||
     source.expires_at ||
     source.pix?.expires_at ||
-    (source.expire_at ? new Date(source.expire_at).getTime() : now() + 10 * 60 * 1000);
+    source.expire_at ||
+    0;
+  const parsedExpiresAt = parseProviderTimestamp(expiresAtRaw);
+  const safeExpiresAt = parsedExpiresAt > now() ? parsedExpiresAt : now() + 10 * 60 * 1000;
 
   if (!resolvedTxid) throw new Error("Resposta do provedor Pix sem txid");
 
@@ -1007,7 +1035,7 @@ function normalizeCreateResponse(providerData, requestedAmount, cfg) {
           )}`
         : ""),
     createdAt: now(),
-    expiresAt: typeof expiresAt === "number" ? expiresAt : new Date(expiresAt).getTime(),
+    expiresAt: safeExpiresAt,
   };
 
   runtimeChargeStatus.set(normalized.txid, normalized);
@@ -1045,10 +1073,17 @@ function fillPixPresentationFromProvider(charge, providerData, cfg) {
     source.pix?.copyPaste,
     source.pix?.code,
     source.pix?.copy_paste,
+    source.pix?.copy_and_paste,
+    source.pix?.pix_code,
+    source.pixCode,
+    source.codigo_pix,
+    source.copy_and_paste,
     source.pix?.brcode,
     sourcePix.copyPaste,
     sourcePix.code,
     sourcePix.copy_paste,
+    sourcePix.copy_and_paste,
+    sourcePix.pix_code,
     sourcePix.brcode,
     sourcePix.emv,
     sourcePayment.pix_code,

@@ -36,15 +36,23 @@ export async function renderBonusCpaView(container) {
             <small>Status afiliado</small>
             <strong>${statusBadge(affiliate.status)}</strong>
           </div>
-          <div class="metric-item">
-            <small>Total CPA acumulado</small>
-            <strong class="mono">${formatCurrency(affiliate.totalCpa || 0)}</strong>
-          </div>
-          <div class="metric-item">
-            <small>Depositantes válidos</small>
-            <strong class="mono">${Number(affiliate.referredDepositors || 0)}</strong>
-          </div>
         </div>
+        ${
+          affiliate.status === "APPROVED"
+            ? `
+          <div class="metric-inline" style="margin-top:0.75rem;">
+            <div class="metric-item">
+              <small>Total CPA acumulado</small>
+              <strong class="mono">${formatCurrency(affiliate.totalCpa || 0)}</strong>
+            </div>
+            <div class="metric-item">
+              <small>Depositantes válidos</small>
+              <strong class="mono">${Number(affiliate.referredDepositors || 0)}</strong>
+            </div>
+          </div>
+        `
+            : ""
+        }
       </article>
 
       <article class="section-card">

@@ -113,7 +113,7 @@ export function renderAuthView(container, { navigate }) {
         </div>
         <label style="display:flex; gap:0.55rem; align-items:flex-start; font-size:0.88rem; color:var(--text-1);">
           <input id="register-terms" type="checkbox" style="margin-top:0.2rem;" />
-          Aceito os termos da conta de demonstração.
+          Aceito os termos de uso da plataforma.
         </label>
         <button class="btn btn-primary btn-block" type="submit">Criar Conta</button>
       </form>

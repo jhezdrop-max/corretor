@@ -7,6 +7,9 @@ import { showToast } from "../components/toast.js";
 import { updateHeaderBalance } from "../components/header.js";
 
 function formatCountdown(expiresAt) {
+  if (!Number.isFinite(Number(expiresAt))) {
+    return "--:--";
+  }
   const distance = Math.max(0, expiresAt - Date.now());
   const minutes = Math.floor(distance / 60000)
     .toString()
@@ -37,7 +40,7 @@ export async function renderDepositView(container) {
             <input class="input" id="deposit-amount" type="number" min="30" step="0.01" placeholder="100.00" required />
           </div>
           <button class="btn btn-primary" type="submit">Gerar Cobrança Pix</button>
-          <p class="help-text">Depósito mínimo: R$ 30,00. API Pix: <span class="mono">createPixCharge()</span> e <span class="mono">getPixChargeStatus()</span>.</p>
+          <p class="help-text">Depósito mínimo: R$ 30,00.</p>
         </form>
         ${renderBannerBlock(contentConfig, "deposit_after_generate")}
 
@@ -61,6 +64,10 @@ export async function renderDepositView(container) {
     if (!charge) {
       resultBox.classList.add("hidden");
       return;
+    }
+
+    if (!Number.isFinite(Number(charge.expiresAt)) || Number(charge.expiresAt) <= Date.now()) {
+      charge.expiresAt = Date.now() + 10 * 60 * 1000;
     }
 
     resultBox.classList.remove("hidden");
@@ -121,7 +128,7 @@ export async function renderDepositView(container) {
         node.textContent = formatCountdown(charge.expiresAt);
       }
 
-      if (Date.now() > charge.expiresAt && charge.status === "PENDING") {
+      if (Number.isFinite(Number(charge.expiresAt)) && Date.now() > charge.expiresAt && charge.status === "PENDING") {
         charge.status = "EXPIRED";
         refreshStatusBadge();
         clearInterval(countdownTimer);
