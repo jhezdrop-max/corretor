@@ -1315,13 +1315,18 @@ function listClientAccountsData() {
     }));
 }
 
-function validateUserProfileData({ name, email, cpf, pixKey, address }) {
+function validateUserProfileData(
+  { name, email, cpf, pixKey, address },
+  { requireCpf = true, requirePixKey = true, requireAddress = true } = {},
+) {
   if (!String(name || "").trim()) return "Nome é obrigatório.";
   if (!String(email || "").includes("@")) return "E-mail inválido.";
-  const normalizedCpf = onlyDigits(cpf);
-  if (normalizedCpf.length !== 11) return "CPF inválido. Informe 11 dígitos.";
-  if (!String(pixKey || "").trim()) return "Chave Pix é obrigatória.";
-  if (String(address || "").trim().length < 8) return "Endereço residencial inválido.";
+  if (requireCpf) {
+    const normalizedCpf = onlyDigits(cpf);
+    if (normalizedCpf.length !== 11) return "CPF inválido. Informe 11 dígitos.";
+  }
+  if (requirePixKey && !String(pixKey || "").trim()) return "Chave Pix é obrigatória.";
+  if (requireAddress && String(address || "").trim().length < 8) return "Endereço residencial inválido.";
   return "";
 }
 
@@ -1564,7 +1569,10 @@ async function handleApi(req, res, pathname) {
       const address = String(body.address || "").trim();
       const referralCode = String(body.referralCode || "").trim();
 
-      const validationError = validateUserProfileData({ name, email, cpf, pixKey, address });
+      const validationError = validateUserProfileData(
+        { name, email, cpf, pixKey, address },
+        { requireCpf: false, requirePixKey: false, requireAddress: false },
+      );
       if (validationError) {
         sendJson(res, 400, { error: validationError });
         return;
