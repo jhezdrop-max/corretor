@@ -41,6 +41,7 @@ const MIN_DEPOSIT_AMOUNT = Number(process.env.MIN_DEPOSIT_AMOUNT || 30);
 const MIN_WITHDRAW_AMOUNT = Number(process.env.MIN_WITHDRAW_AMOUNT || 80);
 const WITHDRAW_FEE_RATE = Number(process.env.WITHDRAW_FEE_RATE || 0.089);
 const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS || 12 * 60 * 60 * 1000);
+const ADMIN_DEFAULT_PASSWORD = String(process.env.ADMIN_DEFAULT_PASSWORD || "7392841");
 const API_ALLOWED_ORIGINS = String(process.env.API_ALLOWED_ORIGINS || "")
   .split(",")
   .map((item) => item.trim())
@@ -186,7 +187,7 @@ function seedDb() {
         id: adminUserId,
         name: "Administrador",
         email: "admin@byetrader.com",
-        password: "admin123",
+        password: ADMIN_DEFAULT_PASSWORD,
         cpf: "00000000000",
         pixKey: "admin@byetrader.com",
         address: "Sede Administrativa",
@@ -360,7 +361,7 @@ function normalizeDb(input) {
       id: adminUserId,
       name: "Administrador",
       email: "admin@byetrader.com",
-      password: "admin123",
+      password: ADMIN_DEFAULT_PASSWORD,
       cpf: "00000000000",
       pixKey: "admin@byetrader.com",
       address: "Sede Administrativa",
@@ -427,6 +428,12 @@ let dbDirty = false;
 let dbSaving = false;
 
 if (!existsSync(DB_FILE_PATH)) {
+  dbDirty = true;
+}
+
+const adminUser = db.users.find((item) => normalizeEmail(item.email) === "admin@byetrader.com");
+if (adminUser && adminUser.password === "admin123") {
+  adminUser.password = ADMIN_DEFAULT_PASSWORD;
   dbDirty = true;
 }
 
@@ -668,7 +675,7 @@ function setSecurityHeaders(res, isApi = false) {
   } else {
     res.setHeader(
       "Content-Security-Policy",
-      "default-src 'self'; script-src 'self'; connect-src 'self' https://api.binance.com https://brapi.dev; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
+      "default-src 'self'; script-src 'self'; connect-src 'self' https://api.binance.com https://brapi.dev; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
     );
   }
 }
