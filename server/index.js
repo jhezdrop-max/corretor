@@ -434,7 +434,7 @@ if (!existsSync(DB_FILE_PATH)) {
 }
 
 const adminUser = db.users.find((item) => normalizeEmail(item.email) === "admin@byetrader.com");
-if (adminUser && adminUser.password === "admin123") {
+if (adminUser && ADMIN_DEFAULT_PASSWORD && adminUser.password !== ADMIN_DEFAULT_PASSWORD) {
   adminUser.password = ADMIN_DEFAULT_PASSWORD;
   dbDirty = true;
 }
