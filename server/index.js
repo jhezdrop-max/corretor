@@ -43,6 +43,7 @@ const MIN_WITHDRAW_AMOUNT = Number(process.env.MIN_WITHDRAW_AMOUNT || 80);
 const WITHDRAW_FEE_RATE = Number(process.env.WITHDRAW_FEE_RATE || 0.089);
 const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS || 12 * 60 * 60 * 1000);
 const ADMIN_DEFAULT_PASSWORD = String(process.env.ADMIN_DEFAULT_PASSWORD || "7392841");
+const DEMO_DEFAULT_PASSWORD = String(process.env.DEMO_DEFAULT_PASSWORD || "123456");
 const API_ALLOWED_ORIGINS = String(process.env.API_ALLOWED_ORIGINS || "")
   .split(",")
   .map((item) => item.trim())
@@ -436,6 +437,11 @@ if (!existsSync(DB_FILE_PATH)) {
 const adminUser = db.users.find((item) => normalizeEmail(item.email) === "admin@byetrader.com");
 if (adminUser && ADMIN_DEFAULT_PASSWORD && adminUser.password !== ADMIN_DEFAULT_PASSWORD) {
   adminUser.password = ADMIN_DEFAULT_PASSWORD;
+  dbDirty = true;
+}
+const demoUser = db.users.find((item) => normalizeEmail(item.email) === "demo@byetrader.com");
+if (demoUser && DEMO_DEFAULT_PASSWORD && demoUser.password !== DEMO_DEFAULT_PASSWORD) {
+  demoUser.password = DEMO_DEFAULT_PASSWORD;
   dbDirty = true;
 }
 
