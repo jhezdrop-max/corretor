@@ -734,8 +734,8 @@
 
   .chart {
     --chart-inset: 0.55rem;
-    --chart-right-gap: 10%;
-    height: 500px;
+    --chart-right-gap: 18%;
+    height: 400px;
   }
 
   .chart-candles-layer {
@@ -748,6 +748,40 @@
   .chart-control-btn {
     min-width: 40px;
     padding: 0.42rem 0.6rem;
+    flex: 0 0 auto;
+  }
+
+  .metric-inline {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-3);
+  }
+
+  .metric-item:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .chart-controls {
+    gap: var(--space-2);
+  }
+
+  .chart-intervals,
+  .chart-zoom-controls,
+  .chart-timeframes {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    padding-bottom: 0.2rem;
+  }
+
+  .trade-order-card .inline-actions .btn {
+    flex: 1;
+    min-width: 120px;
+  }
+
+  .chart-tooltip {
+    display: none;
   }
 
   .table {
@@ -765,6 +799,10 @@
     justify-self: stretch;
   }
 
+  .trade-grid {
+    gap: var(--space-3);
+  }
+
   .awards-grid {
     grid-template-columns: 1fr;
   }
@@ -776,5 +814,17 @@
   .awards-tier-journey {
     width: calc(100% - 2rem);
     justify-self: end;
+  }
+}
+
+@media (max-width: 420px) {
+  .chart {
+    --chart-right-gap: 22%;
+    height: 360px;
+  }
+
+  .chart-price-row,
+  .chart-live-price {
+    font-size: 0.62rem;
   }
 }

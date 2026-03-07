@@ -8,13 +8,13 @@ import { formatCurrency, formatDateTime } from "../store.js";
 import { showToast } from "../components/toast.js";
 import { updateHeaderBalance } from "../components/header.js";
 
-const MARKET_TICK_MS = 1000;
-const DEFAULT_HISTORY_WINDOW = "1d";
-const DEFAULT_CANDLE_INTERVAL = APP_CONFIG.defaultCandleInterval || "15m";
+const MARKET_TICK_MS = 700;
+const DEFAULT_HISTORY_WINDOW = "1h";
+const DEFAULT_CANDLE_INTERVAL = "1m";
 const MIN_TRADE_AMOUNT = 2;
 const ZOOM_FACTORS = [1, 1.4, 2, 2.8, 3.8];
-const DEFAULT_ZOOM_INDEX = 2;
-const TIP_WOBBLE_RATIO = 0.0009;
+const DEFAULT_ZOOM_INDEX = 4;
+const TIP_WOBBLE_RATIO = 0.0018;
 const TIMEFRAME_OPTIONS = [
   { key: "1h", label: "1 hora", seconds: 3600 },
   { key: "5h", label: "5 horas", seconds: 18000 },
@@ -42,6 +42,13 @@ function getSeriesLengthByTimeframe(timeframeKey) {
 function getCandleIntervalMs(intervalKey) {
   const available = Array.isArray(APP_CONFIG.candleIntervals) ? APP_CONFIG.candleIntervals : [];
   return available.find((item) => item.key === intervalKey)?.ms || 15 * 60 * 1000;
+}
+
+function getPriceDecimals(symbolConfig) {
+  if (symbolConfig?.marketType === "crypto") {
+    return Math.max(2, Math.min(6, Number(symbolConfig.precision || 2) + 2));
+  }
+  return Math.max(2, Number(symbolConfig?.precision || 2));
 }
 
 function buildCandles(points, tipWobble = 0) {
@@ -96,7 +103,7 @@ function generateHistorySeries(seedPrice, size, symbolConfig) {
   return points;
 }
 
-function renderCandles(container, points, axisState, tipWobble, intervalMs) {
+function renderCandles(container, points, axisState, tipWobble, intervalMs, symbolConfig) {
   const candles = buildCandles(points, tipWobble);
   if (!candles.length) {
     container.innerHTML = "";
@@ -110,8 +117,9 @@ function renderCandles(container, points, axisState, tipWobble, intervalMs) {
   const naturalMax = Math.max(...stableAll);
   const latestClose = candles[candles.length - 1].close;
   const maxDistance = Math.max(latestClose - naturalMin, naturalMax - latestClose);
-  const minHalfRange = Math.max(Math.abs(latestClose) * 0.0025, 0.0001);
-  const halfRange = Math.max(maxDistance * 1.12, minHalfRange);
+  const isCrypto = symbolConfig?.marketType === "crypto";
+  const minHalfRange = Math.max(Math.abs(latestClose) * (isCrypto ? 0.00045 : 0.0025), isCrypto ? 0.00005 : 0.0001);
+  const halfRange = Math.max(maxDistance * (isCrypto ? 1.05 : 1.12), minHalfRange);
   const targetMin = latestClose - halfRange;
   const targetMax = latestClose + halfRange;
 
@@ -119,11 +127,12 @@ function renderCandles(container, points, axisState, tipWobble, intervalMs) {
   let max = targetMax;
   if (axisState) {
     const span = Math.max(axisState.max - axisState.min, 0.0000001);
-    const lowerGuard = axisState.min + span * 0.17;
-    const upperGuard = axisState.max - span * 0.17;
+    const guardRatio = isCrypto ? 0.12 : 0.17;
+    const lowerGuard = axisState.min + span * guardRatio;
+    const upperGuard = axisState.max - span * guardRatio;
     const outOfGuard = latestClose < lowerGuard || latestClose > upperGuard;
     if (outOfGuard) {
-      const alpha = 0.2;
+      const alpha = isCrypto ? 0.34 : 0.2;
       min = axisState.min + (targetMin - axisState.min) * alpha;
       max = axisState.max + (targetMax - axisState.max) * alpha;
     } else {
@@ -361,6 +370,7 @@ export async function renderTradeView(container) {
   const tradesTableBody = container.querySelector("#trades-table tbody");
   const messageBox = container.querySelector("#trade-message");
   const symbolSelect = container.querySelector("#trade-symbol");
+  const directionButtons = [...container.querySelectorAll("[data-direction]")];
   const zoomInBtn = container.querySelector("#chart-zoom-in");
   const zoomOutBtn = container.querySelector("#chart-zoom-out");
   const resetBtn = container.querySelector("#chart-reset");
@@ -370,6 +380,21 @@ export async function renderTradeView(container) {
   function showMessage(message, type = "error") {
     messageBox.textContent = message;
     messageBox.className = type === "success" ? "success-box" : type === "info" ? "info-box" : "error-box";
+  }
+
+  function refreshTradeAvailability() {
+    const symbolConfig = findSymbolConfig(symbolSelect.value);
+    const tradeEnabled = symbolConfig.marketType !== "stock";
+    directionButtons.forEach((button) => {
+      button.disabled = !tradeEnabled;
+    });
+
+    if (!tradeEnabled) {
+      showMessage("Operações estão habilitadas apenas para criptomoedas. Ações ficam em modo visualização.", "info");
+    } else if (messageBox.classList.contains("info-box")) {
+      messageBox.className = "hidden";
+      messageBox.textContent = "";
+    }
   }
 
   function refreshWalletUI() {
@@ -443,9 +468,10 @@ export async function renderTradeView(container) {
 
   function renderChart() {
     const symbolConfig = findSymbolConfig(selectedSymbolCode);
-    const tipWobble = symbolConfig.marketType === "stock" ? TIP_WOBBLE_RATIO * 0.55 : TIP_WOBBLE_RATIO;
+    const priceDecimals = getPriceDecimals(symbolConfig);
+    const tipWobble = symbolConfig.marketType === "stock" ? TIP_WOBBLE_RATIO * 0.35 : TIP_WOBBLE_RATIO * 1.35;
     const intervalMs = getCandleIntervalMs(selectedCandleInterval);
-    lastRender = renderCandles(chartCandlesEl, getVisibleSeries(), chartAxis, tipWobble, intervalMs);
+    lastRender = renderCandles(chartCandlesEl, getVisibleSeries(), chartAxis, tipWobble, intervalMs, symbolConfig);
     if (!lastRender) {
       chartOhlc.textContent = "OHLC: -";
       if (chartPriceScaleEl) chartPriceScaleEl.innerHTML = "";
@@ -463,7 +489,7 @@ export async function renderTradeView(container) {
     for (let i = 0; i < levels; i += 1) {
       const ratio = i / (levels - 1);
       const price = lastRender.max - lastRender.spread * ratio;
-      rows.push(`<div class="chart-price-row">${price.toFixed(6)}</div>`);
+      rows.push(`<div class="chart-price-row">${price.toFixed(priceDecimals)}</div>`);
     }
     if (chartPriceScaleEl) {
       chartPriceScaleEl.innerHTML = rows.join("");
@@ -472,7 +498,7 @@ export async function renderTradeView(container) {
       const markerPrice = Number(latestTicker.price || lastRender.latestClose);
       const markerPct = clamp(((lastRender.max - markerPrice) / lastRender.spread) * 100, 0, 100);
       chartLivePriceEl.style.top = `calc(${markerPct}% - 10px)`;
-      chartLivePriceEl.textContent = `${markerPrice.toFixed(6)}`;
+      chartLivePriceEl.textContent = `${markerPrice.toFixed(priceDecimals)}`;
     }
 
     const activeSymbolLabel = findSymbolConfig(selectedSymbolCode).label;
@@ -486,7 +512,7 @@ export async function renderTradeView(container) {
           const topPct = clamp(((lastRender.max - entryPrice) / lastRender.spread) * 100, 0, 100);
           return `
             <div class="order-line" style="top:${topPct}%;">
-              <span class="order-line-label">Entrada ${entryPrice.toFixed(6)}</span>
+              <span class="order-line-label">Entrada ${entryPrice.toFixed(priceDecimals)}</span>
             </div>
           `;
         })
@@ -495,7 +521,7 @@ export async function renderTradeView(container) {
 
     chartOhlc.textContent = `Intervalo ${selectedCandleInterval} | Janela ${selectedHistoryWindow} | Ultimo ${Number(
       latestTicker.price || lastRender.latestClose,
-    ).toFixed(6)}`;
+    ).toFixed(priceDecimals)}`;
   }
 
   function markActiveTimeframe() {
@@ -522,6 +548,8 @@ export async function renderTradeView(container) {
     const y = clamp(mouseY - candlesRect.top, 0, candlesRect.height);
     const index = clamp(Math.floor((x / candlesRect.width) * lastRender.candles.length), 0, lastRender.candles.length - 1);
     const candle = lastRender.candles[index];
+    const symbolConfig = findSymbolConfig(selectedSymbolCode);
+    const priceDecimals = getPriceDecimals(symbolConfig);
     const candleMs = lastRender.intervalMs || getCandleIntervalMs(selectedCandleInterval);
     const at = new Date(Date.now() - (lastRender.candles.length - 1 - index) * candleMs);
     const yPrice = lastRender.min + ((candlesRect.height - y) / candlesRect.height) * lastRender.spread;
@@ -541,14 +569,14 @@ export async function renderTradeView(container) {
     chartTooltip.style.top = `${tooltipY + layerOffsetY}px`;
     chartTooltip.innerHTML = `
       <div>${at.toLocaleString("pt-BR")}</div>
-      <div>O: ${candle.open.toFixed(6)}</div>
-      <div>H: ${candle.high.toFixed(6)}</div>
-      <div>L: ${candle.low.toFixed(6)}</div>
-      <div>C: ${candle.close.toFixed(6)}</div>
-      <div>P: ${yPrice.toFixed(6)}</div>
+      <div>O: ${candle.open.toFixed(priceDecimals)}</div>
+      <div>H: ${candle.high.toFixed(priceDecimals)}</div>
+      <div>L: ${candle.low.toFixed(priceDecimals)}</div>
+      <div>C: ${candle.close.toFixed(priceDecimals)}</div>
+      <div>P: ${yPrice.toFixed(priceDecimals)}</div>
     `;
 
-    chartOhlc.textContent = `OHLC  O:${candle.open.toFixed(6)}  H:${candle.high.toFixed(6)}  L:${candle.low.toFixed(6)}  C:${candle.close.toFixed(6)}`;
+    chartOhlc.textContent = `OHLC  O:${candle.open.toFixed(priceDecimals)}  H:${candle.high.toFixed(priceDecimals)}  L:${candle.low.toFixed(priceDecimals)}  C:${candle.close.toFixed(priceDecimals)}`;
   }
 
   async function rebuildChartSeries() {
@@ -563,7 +591,7 @@ export async function renderTradeView(container) {
 
     const priceEl = container.querySelector("#market-price");
     const sourceEl = container.querySelector("#market-source");
-    if (priceEl) priceEl.textContent = latestTicker.price.toFixed(symbolConfig.precision || 2);
+    if (priceEl) priceEl.textContent = latestTicker.price.toFixed(getPriceDecimals(symbolConfig));
     if (sourceEl) sourceEl.textContent = latestTicker.source.toUpperCase();
 
     renderChart();
@@ -583,7 +611,7 @@ export async function renderTradeView(container) {
     const priceEl = container.querySelector("#market-price");
     const variationEl = container.querySelector("#market-variation");
     const sourceEl = container.querySelector("#market-source");
-    if (priceEl) priceEl.textContent = latestTicker.price.toFixed(symbolConfig.precision || 2);
+    if (priceEl) priceEl.textContent = latestTicker.price.toFixed(getPriceDecimals(symbolConfig));
     if (variationEl) {
       variationEl.textContent = `${variation.toFixed(3)}%`;
       variationEl.style.color = variation >= 0 ? "var(--gain)" : "var(--loss)";
@@ -619,6 +647,11 @@ export async function renderTradeView(container) {
     const symbolConfig = findSymbolConfig(symbolCode);
     const amount = Number(container.querySelector("#trade-amount").value);
     const expirySeconds = Number(container.querySelector("#trade-expiry").value);
+
+    if (symbolConfig.marketType === "stock") {
+      showMessage("Trade bloqueado para ações. Selecione um ativo de Cripto para operar.", "error");
+      return;
+    }
 
     if (!amount || amount < MIN_TRADE_AMOUNT) {
       showMessage("Valor minimo da ordem: R$ 2,00.");
@@ -694,6 +727,7 @@ export async function renderTradeView(container) {
 
   symbolSelect.addEventListener("change", async () => {
     selectedSymbolCode = symbolSelect.value;
+    refreshTradeAvailability();
     await rebuildChartSeries();
   });
 
@@ -755,6 +789,7 @@ export async function renderTradeView(container) {
 
   markActiveTimeframe();
   refreshZoomUI();
+  refreshTradeAvailability();
   await syncTrades();
   await rebuildChartSeries();
   await refreshTicker();

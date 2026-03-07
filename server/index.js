@@ -31,6 +31,7 @@ const PORT = Number(process.env.PORT || 5500);
 const PIX_PROVIDER_BASE_URL = process.env.PIX_PROVIDER_BASE_URL || "";
 const PIX_CREATE_PATH = process.env.PIX_CREATE_PATH || "/charges";
 const PIX_STATUS_PATH_TEMPLATE = process.env.PIX_STATUS_PATH_TEMPLATE || "/charges/{txid}";
+const PIX_PROVIDER = String(process.env.PIX_PROVIDER || "auto").toLowerCase();
 const PIX_API_TOKEN = process.env.PIX_API_TOKEN || "";
 const PIX_AUTH_SCHEME = process.env.PIX_AUTH_SCHEME || "Bearer";
 const PIX_TIMEOUT_MS = Number(process.env.PIX_TIMEOUT_MS || 12000);
@@ -50,6 +51,7 @@ const DB_FILE_PATH = process.env.DB_FILE_PATH || path.resolve(ROOT_DIR, "data", 
 const DB_AUTOSAVE_INTERVAL_MS = Number(process.env.DB_AUTOSAVE_INTERVAL_MS || 2000);
 
 const runtimePixConfig = {
+  provider: "",
   baseUrl: "",
   createPath: "",
   statusPathTemplate: "",
@@ -768,7 +770,8 @@ function mapPixStatus(value) {
 
 function getPixConfig() {
   const savedPixConfig = db?.settings?.pixConfig || {};
-  return {
+  const cfg = {
+    provider: runtimePixConfig.provider || savedPixConfig.provider || PIX_PROVIDER || "auto",
     baseUrl: runtimePixConfig.baseUrl || savedPixConfig.baseUrl || PIX_PROVIDER_BASE_URL,
     createPath: runtimePixConfig.createPath || savedPixConfig.createPath || PIX_CREATE_PATH,
     statusPathTemplate:
@@ -792,10 +795,87 @@ function getPixConfig() {
       process.env.PIX_PRODUCT_SALE_PAGE ||
       "",
   };
+  return cfg;
+}
+
+function detectPixProvider(cfg) {
+  const explicit = String(cfg?.provider || "").toLowerCase().trim();
+  if (["tribopay", "pagarme", "generic"].includes(explicit)) return explicit;
+
+  const baseUrl = String(cfg?.baseUrl || "").toLowerCase();
+  if (baseUrl.includes("tribopay.com.br")) return "tribopay";
+  if (baseUrl.includes("pagar.me")) return "pagarme";
+  return "generic";
 }
 
 function isTriboPayConfig(cfg) {
-  return String(cfg.baseUrl || "").includes("tribopay.com.br");
+  return detectPixProvider(cfg) === "tribopay";
+}
+
+function isPagarMeConfig(cfg) {
+  return detectPixProvider(cfg) === "pagarme";
+}
+
+function buildPixCreatePayload(cfg, amount, customer, clientUser) {
+  const cents = Math.round(amount * 100);
+
+  if (isTriboPayConfig(cfg)) {
+    return {
+      amount: cents,
+      offer_hash: cfg.offerHash,
+      payment_method: "pix",
+      customer: {
+        name: String(customer.name || clientUser.name || "Cliente Bye Trader"),
+        email: String(customer.email || clientUser.email || "cliente@byetrader.com"),
+        phone_number: onlyDigits(customer.phone_number || "11999999999"),
+        document: onlyDigits(customer.document || clientUser.cpf || "00000000000"),
+      },
+      cart: [
+        {
+          offer_hash: cfg.offerHash,
+          product_hash: cfg.productHash,
+          title: cfg.productTitle,
+          cover: cfg.productCover || undefined,
+          sale_page: cfg.productSalePage || undefined,
+          price: cents,
+          quantity: 1,
+          operation_type: 1,
+          tangible: false,
+        },
+      ],
+    };
+  }
+
+  if (isPagarMeConfig(cfg)) {
+    return {
+      code: `BYE-${Date.now()}`,
+      customer: {
+        name: String(customer.name || clientUser.name || "Cliente Bye Trader"),
+        email: String(customer.email || clientUser.email || "cliente@byetrader.com"),
+        type: "individual",
+        document: onlyDigits(customer.document || clientUser.cpf || "00000000000"),
+        document_type: "CPF",
+      },
+      items: [
+        {
+          amount: cents,
+          description: cfg.productTitle || "Deposito Bye Trader",
+          quantity: 1,
+          code: cfg.productHash || "deposito",
+        },
+      ],
+      payments: [
+        {
+          payment_method: "pix",
+          pix: {
+            expires_in: 600,
+          },
+        },
+      ],
+    };
+  }
+
+  return { amount };
 }
 
 function unwrapProviderData(providerData) {
@@ -881,12 +961,14 @@ function findQrCodeDeep(input) {
     if (!trimmed) return;
 
     const isDataImage = trimmed.startsWith("data:image/");
+    const isImageUrl = /^https?:\/\//i.test(trimmed);
     const isQrNamedField =
       normalizedKey.includes("qrcode") ||
       normalizedKey.includes("qr_code") ||
-      normalizedKey.includes("qrimage");
+      normalizedKey.includes("qrimage") ||
+      normalizedKey.includes("qr_code_url");
 
-    if (isDataImage || (isQrNamedField && trimmed.length > 80)) {
+    if (isDataImage || (isQrNamedField && (trimmed.length > 80 || isImageUrl))) {
       found = trimmed;
     }
   });
@@ -951,6 +1033,7 @@ function normalizeCreateResponse(providerData, requestedAmount, cfg) {
     source.pix?.copy_paste,
     source.pix?.copy_and_paste,
     source.pix?.pix_code,
+    source.qr_code,
     source.pixCode,
     source.codigo_pix,
     source.copy_and_paste,
@@ -963,6 +1046,7 @@ function normalizeCreateResponse(providerData, requestedAmount, cfg) {
     sourcePix.brcode,
     sourcePix.emv,
     sourcePayment.pix_code,
+    sourcePayment.qr_code,
     sourcePayment.copy_paste,
     findPixCodeDeep(source),
   );
@@ -973,6 +1057,7 @@ function normalizeCreateResponse(providerData, requestedAmount, cfg) {
     source.qrcode,
     source.qr_code,
     source.qr_code_base64,
+    source.qr_code_url,
     source.pix_qr_code,
     source.pix_qrcode_base64,
     source.pix?.qrcode,
@@ -985,6 +1070,7 @@ function normalizeCreateResponse(providerData, requestedAmount, cfg) {
     sourcePix.qrCodeBase64,
     sourcePayment.qr_code,
     sourcePayment.qr_code_base64,
+    sourcePayment.qr_code_url,
     findQrCodeDeep(source),
   );
 
@@ -1082,6 +1168,7 @@ function fillPixPresentationFromProvider(charge, providerData, cfg) {
     source.pix?.copy_paste,
     source.pix?.copy_and_paste,
     source.pix?.pix_code,
+    source.qr_code,
     source.pixCode,
     source.codigo_pix,
     source.copy_and_paste,
@@ -1094,6 +1181,7 @@ function fillPixPresentationFromProvider(charge, providerData, cfg) {
     sourcePix.brcode,
     sourcePix.emv,
     sourcePayment.pix_code,
+    sourcePayment.qr_code,
     sourcePayment.copy_paste,
     findPixCodeDeep(source),
   );
@@ -1104,6 +1192,7 @@ function fillPixPresentationFromProvider(charge, providerData, cfg) {
     source.qrcode,
     source.qr_code,
     source.qr_code_base64,
+    source.qr_code_url,
     source.pix_qr_code,
     source.pix_qrcode_base64,
     source.pix?.qrcode,
@@ -1116,6 +1205,7 @@ function fillPixPresentationFromProvider(charge, providerData, cfg) {
     sourcePix.qrCodeBase64,
     sourcePayment.qr_code,
     sourcePayment.qr_code_base64,
+    sourcePayment.qr_code_url,
     findQrCodeDeep(source),
   );
 
@@ -2489,6 +2579,7 @@ async function handleApi(req, res, pathname) {
     const cfg = getPixConfig();
     sendJson(res, 200, {
       configured: Boolean(cfg.baseUrl && cfg.apiToken),
+      provider: detectPixProvider(cfg),
       source: runtimePixConfig.apiToken ? "runtime" : "env",
       baseUrl: cfg.baseUrl || "",
       createPath: cfg.createPath || "",
@@ -2512,6 +2603,7 @@ async function handleApi(req, res, pathname) {
 
     try {
       const body = await readJsonBody(req);
+      const provider = String(body.provider || "").trim().toLowerCase();
       const baseUrl = String(body.baseUrl || "").trim();
       const createPath = String(body.createPath || "").trim();
       const statusPathTemplate = String(body.statusPathTemplate || "").trim();
@@ -2528,7 +2620,12 @@ async function handleApi(req, res, pathname) {
         return;
       }
 
-      const forTribo = String(baseUrl).includes("tribopay.com.br");
+      if (provider && !["tribopay", "pagarme", "generic"].includes(provider)) {
+        sendJson(res, 400, { error: "Provedor Pix inválido. Use tribopay, pagarme ou generic." });
+        return;
+      }
+
+      const forTribo = provider ? provider === "tribopay" : String(baseUrl).includes("tribopay.com.br");
       if (forTribo && (!offerHash || !productHash)) {
         sendJson(res, 400, { error: "Para TriboPay, informe offer_hash e product_hash." });
         return;
@@ -2541,6 +2638,7 @@ async function handleApi(req, res, pathname) {
         return;
       }
 
+      runtimePixConfig.provider = provider;
       runtimePixConfig.baseUrl = baseUrl;
       runtimePixConfig.createPath = createPath;
       runtimePixConfig.statusPathTemplate = statusPathTemplate;
@@ -2553,6 +2651,7 @@ async function handleApi(req, res, pathname) {
       runtimePixConfig.productSalePage = productSalePage;
       db.settings = db.settings || {};
       db.settings.pixConfig = {
+        provider,
         baseUrl,
         createPath,
         statusPathTemplate,
@@ -2606,35 +2705,8 @@ async function handleApi(req, res, pathname) {
         };
         runtimeChargeStatus.set(normalized.txid, normalized);
       } else {
-      let payload = { amount };
-      if (isTriboPayConfig(cfg)) {
-        const cents = Math.round(amount * 100);
         const customer = body.customer || {};
-        payload = {
-          amount: cents,
-          offer_hash: cfg.offerHash,
-          payment_method: "pix",
-          customer: {
-            name: String(customer.name || clientUser.name || "Cliente Bye Trader"),
-            email: String(customer.email || clientUser.email || "cliente@byetrader.com"),
-            phone_number: onlyDigits(customer.phone_number || "11999999999"),
-            document: onlyDigits(customer.document || clientUser.cpf || "00000000000"),
-          },
-          cart: [
-            {
-              offer_hash: cfg.offerHash,
-              product_hash: cfg.productHash,
-              title: cfg.productTitle,
-              cover: cfg.productCover || undefined,
-              sale_page: cfg.productSalePage || undefined,
-              price: cents,
-              quantity: 1,
-              operation_type: 1,
-              tangible: false,
-            },
-            ],
-          };
-        }
+        const payload = buildPixCreatePayload(cfg, amount, customer, clientUser);
 
         const providerData = await callPixProvider(cfg.createPath, "POST", payload);
         normalized = normalizeCreateResponse(providerData, amount, cfg);
