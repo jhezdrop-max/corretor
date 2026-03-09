@@ -137,6 +137,7 @@ cp .env.example .env
 
 Variáveis principais:
 
+- `PIX_PROVIDER` (`pagarme`, `tribopay`, `generic`)
 - `PIX_PROVIDER_BASE_URL`
 - `PIX_CREATE_PATH`
 - `PIX_STATUS_PATH_TEMPLATE`
@@ -159,27 +160,38 @@ Existe um bloco no `Painel Admin` para configurar API Pix:
 - Product title
 - Token Pix (campo oculto)
 
+Obs: `Offer hash` e `Product hash` são obrigatórios somente para TriboPay.
+
 Essa configuração agora é salva no backend (arquivo local do servidor) e permanece após restart.
 Para ambiente Railway, configure volume persistente e `DB_FILE_PATH` (ex.: `/data/byetrader-db.json`) para não perder dados em novo deploy.
 
 Se você definir `ADMIN_PANEL_SECRET` no `.env`, o painel exige esse segredo para salvar/ler status da configuração Pix.
 
-### TriboPay (referência prática)
+### Pagar.me (referência prática)
 
 No painel admin use:
 
-- URL base: `https://api.tribopay.com.br/api/public/v1/`
-- Path criar: `transactions`
-- Path status: `transactions/{txid}`
-- Auth scheme: `Bearer` (não usado na TriboPay, mas mantenha preenchido)
-- Offer hash: valor da sua oferta
-- Product hash: valor do produto
-- Product title: texto do item do carrinho
-- Token Pix: seu `api_token` da TriboPay
+- Provedor: `pagarme`
+- URL base: `https://api.pagar.me/core/v5/`
+- Path criar: `orders`
+- Path status: `orders/{txid}`
+- Auth scheme: `Bearer`
+- Product title: texto do item do pedido
+- Token Pix: chave secreta da Pagar.me
 
 Webhook para notificações automáticas:
 
 - `POST /api/pix/webhook`
+
+### TriboPay (alternativo)
+
+Se quiser usar TriboPay, configure:
+
+- Provedor: `tribopay`
+- URL base: `https://api.tribopay.com.br/api/public/v1/`
+- Path criar: `transactions`
+- Path status: `transactions/{txid}`
+- Offer hash e Product hash obrigatórios
 
 ## Segurança aplicada no frontend
 
@@ -234,13 +246,12 @@ Variáveis obrigatórias no backend:
 PORT=5500
 API_ALLOWED_ORIGINS=https://byeptrader.com,https://www.byeptrader.com
 
-PIX_PROVIDER_BASE_URL=https://api.tribopay.com.br/api/public/v1/
-PIX_CREATE_PATH=transactions
-PIX_STATUS_PATH_TEMPLATE=transactions/{txid}
+PIX_PROVIDER=pagarme
+PIX_PROVIDER_BASE_URL=https://api.pagar.me/core/v5/
+PIX_CREATE_PATH=orders
+PIX_STATUS_PATH_TEMPLATE=orders/{txid}
 PIX_AUTH_SCHEME=Bearer
 PIX_API_TOKEN=SEU_TOKEN
-PIX_OFFER_HASH=sq9iw
-PIX_PRODUCT_HASH=SEU_PRODUCT_HASH
 PIX_PRODUCT_TITLE=Deposito Bye Trader
 PIX_PRODUCT_SALE_PAGE=https://byeptrader.com
 DB_FILE_PATH=/data/byetrader-db.json
@@ -271,7 +282,7 @@ window.__APP_LOCAL_CONFIG__ = {
 };
 ```
 
-### 3) Configurar webhook na TriboPay
+### 3) Configurar webhook no provedor Pix
 
 - `https://SEU-BACKEND/api/pix/webhook`
 
@@ -282,7 +293,7 @@ Exemplo:
 ### 4) Teste final
 
 1. Acesse `https://byeptrader.com`
-2. Gere depósito Pix de R$10
+2. Gere depósito Pix de R$30
 3. Confirme pagamento (`Já paguei`)
 4. Verifique crédito no saldo
 5. Valide no admin transações/saques

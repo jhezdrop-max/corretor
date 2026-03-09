@@ -2,7 +2,7 @@ import { API_MODE, ENDPOINTS, PIX_MODE } from "../config.js";
 import { createPixCharge as createPixChargeMock, getPixChargeStatus as getPixChargeStatusMock } from "../mocks/mock-db.js";
 import { requireSession } from "../store.js";
 
-export async function createPixCharge({ amount }) {
+export async function createPixCharge({ amount, paymentMethod = "pix", card = null }) {
   const session = requireSession();
   const customer = {
     name: session.user?.name || "Cliente Bye Trader",
@@ -18,7 +18,7 @@ export async function createPixCharge({ amount }) {
         "Content-Type": "application/json",
         "X-Client-Session": session.token,
       },
-      body: JSON.stringify({ amount, customer }),
+      body: JSON.stringify({ amount, customer, paymentMethod, card }),
     });
 
     if (!response.ok) {
@@ -28,7 +28,7 @@ export async function createPixCharge({ amount }) {
       } catch {
         payload = null;
       }
-      throw new Error(payload?.error || "Falha ao criar cobrança Pix.");
+      throw new Error(payload?.error || "Falha ao criar cobrança de depósito.");
     }
 
     return response.json();

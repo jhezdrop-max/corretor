@@ -172,10 +172,18 @@ export async function renderAdminView(container) {
           <small class="help-text">Token fica oculto e salvo apenas no backend.</small>
         </div>
         <form id="pix-config-form" class="form-grid" style="margin-bottom:1rem;">
+          <div class="field">
+            <label for="pix-provider">Provedor Pix</label>
+            <select class="select" id="pix-provider" required>
+              <option value="pagarme" selected>Pagar.me</option>
+              <option value="tribopay">TriboPay</option>
+              <option value="generic">Genérico</option>
+            </select>
+          </div>
           <div class="grid-2">
             <div class="field">
               <label for="pix-base-url">URL base do provedor</label>
-              <input class="input" id="pix-base-url" type="text" value="https://api.tribopay.com.br/api/public/v1/" required />
+              <input class="input" id="pix-base-url" type="text" value="https://api.pagar.me/core/v5/" required />
             </div>
             <div class="field">
               <label for="pix-auth-scheme">Auth scheme</label>
@@ -185,21 +193,21 @@ export async function renderAdminView(container) {
           <div class="grid-2">
             <div class="field">
               <label for="pix-create-path">Path criar cobrança</label>
-              <input class="input" id="pix-create-path" type="text" value="transactions" required />
+              <input class="input" id="pix-create-path" type="text" value="orders" required />
             </div>
             <div class="field">
               <label for="pix-status-path">Path status (use {txid})</label>
-              <input class="input" id="pix-status-path" type="text" value="transactions/{txid}" required />
+              <input class="input" id="pix-status-path" type="text" value="orders/{txid}" required />
             </div>
           </div>
           <div class="grid-2">
             <div class="field">
-              <label for="pix-offer-hash">Offer hash</label>
-              <input class="input" id="pix-offer-hash" type="text" placeholder="7becb" required />
+              <label for="pix-offer-hash">Offer hash (TriboPay)</label>
+              <input class="input" id="pix-offer-hash" type="text" placeholder="7becb" />
             </div>
             <div class="field">
-              <label for="pix-product-hash">Product hash</label>
-              <input class="input" id="pix-product-hash" type="text" placeholder="7tjdfkshdv" required />
+              <label for="pix-product-hash">Product hash (TriboPay)</label>
+              <input class="input" id="pix-product-hash" type="text" placeholder="7tjdfkshdv" />
             </div>
           </div>
           <div class="field">
@@ -426,6 +434,7 @@ export async function renderAdminView(container) {
         ? `API Pix configurada (${source}).`
         : "API Pix ainda não configurada.";
 
+      if (status.provider) container.querySelector("#pix-provider").value = status.provider;
       if (status.baseUrl) container.querySelector("#pix-base-url").value = status.baseUrl;
       if (status.createPath) container.querySelector("#pix-create-path").value = status.createPath;
       if (status.statusPathTemplate) container.querySelector("#pix-status-path").value = status.statusPathTemplate;
@@ -438,6 +447,24 @@ export async function renderAdminView(container) {
     } catch (error) {
       pixStatusNode.className = "error-box";
       pixStatusNode.textContent = error.message || "Não foi possível obter status da configuração Pix.";
+    }
+  }
+
+  function applyPixProviderPreset(provider) {
+    const providerKey = String(provider || "").toLowerCase();
+    if (providerKey === "pagarme") {
+      container.querySelector("#pix-base-url").value = "https://api.pagar.me/core/v5/";
+      container.querySelector("#pix-create-path").value = "orders";
+      container.querySelector("#pix-status-path").value = "orders/{txid}";
+      container.querySelector("#pix-auth-scheme").value = "Bearer";
+      return;
+    }
+
+    if (providerKey === "tribopay") {
+      container.querySelector("#pix-base-url").value = "https://api.tribopay.com.br/api/public/v1/";
+      container.querySelector("#pix-create-path").value = "transactions";
+      container.querySelector("#pix-status-path").value = "transactions/{txid}";
+      container.querySelector("#pix-auth-scheme").value = "Bearer";
     }
   }
 
@@ -1042,6 +1069,9 @@ export async function renderAdminView(container) {
     container.querySelector(selector).addEventListener("change", renderClientAccounts);
   });
   container.querySelector("#pix-status-btn").addEventListener("click", refreshPixStatus);
+  container.querySelector("#pix-provider").addEventListener("change", (event) => {
+    applyPixProviderPreset(event.target.value);
+  });
   container.querySelector("#awards-reload-btn").addEventListener("click", loadAwardsConfig);
   container.querySelector("#awards-save-btn").addEventListener("click", async () => {
     const nextAwards = collectAwardsFromEditor();
@@ -1080,6 +1110,7 @@ export async function renderAdminView(container) {
   });
   container.querySelector("#pix-config-form").addEventListener("submit", async (event) => {
     event.preventDefault();
+    const provider = container.querySelector("#pix-provider").value.trim();
     const baseUrl = container.querySelector("#pix-base-url").value.trim();
     const createPath = container.querySelector("#pix-create-path").value.trim();
     const statusPathTemplate = container.querySelector("#pix-status-path").value.trim();
@@ -1092,14 +1123,21 @@ export async function renderAdminView(container) {
     const apiToken = container.querySelector("#pix-api-token").value.trim();
     const adminSecret = container.querySelector("#pix-admin-secret").value.trim();
 
-    if (!baseUrl || !createPath || !statusPathTemplate || !authScheme || !apiToken || !offerHash || !productHash || !productTitle) {
+    if (!provider || !baseUrl || !createPath || !statusPathTemplate || !authScheme || !apiToken || !productTitle) {
       pixStatusNode.className = "error-box";
       pixStatusNode.textContent = "Preencha todos os campos da configuração Pix.";
       return;
     }
 
+    if (provider === "tribopay" && (!offerHash || !productHash)) {
+      pixStatusNode.className = "error-box";
+      pixStatusNode.textContent = "Para TriboPay, informe Offer hash e Product hash.";
+      return;
+    }
+
     try {
       await savePixConfig({
+        provider,
         baseUrl,
         createPath,
         statusPathTemplate,

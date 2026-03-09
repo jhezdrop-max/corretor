@@ -268,6 +268,7 @@ export async function getPixConfigStatus({ adminSecret = "" } = {}) {
 }
 
 export async function savePixConfig({
+  provider,
   baseUrl,
   createPath,
   statusPathTemplate,
@@ -291,6 +292,7 @@ export async function savePixConfig({
       ...(adminSecret ? { "X-Admin-Secret": adminSecret } : {}),
     },
     body: JSON.stringify({
+      provider,
       baseUrl,
       createPath,
       statusPathTemplate,

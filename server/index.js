@@ -28,10 +28,10 @@ function loadDotEnv() {
 loadDotEnv();
 
 const PORT = Number(process.env.PORT || 5500);
-const PIX_PROVIDER_BASE_URL = process.env.PIX_PROVIDER_BASE_URL || "";
-const PIX_CREATE_PATH = process.env.PIX_CREATE_PATH || "/charges";
-const PIX_STATUS_PATH_TEMPLATE = process.env.PIX_STATUS_PATH_TEMPLATE || "/charges/{txid}";
-const PIX_PROVIDER = String(process.env.PIX_PROVIDER || "auto").toLowerCase();
+const PIX_PROVIDER_BASE_URL = process.env.PIX_PROVIDER_BASE_URL || "https://api.pagar.me/core/v5/";
+const PIX_CREATE_PATH = process.env.PIX_CREATE_PATH || "orders";
+const PIX_STATUS_PATH_TEMPLATE = process.env.PIX_STATUS_PATH_TEMPLATE || "orders/{txid}";
+const PIX_PROVIDER = String(process.env.PIX_PROVIDER || "pagarme").toLowerCase();
 const PIX_API_TOKEN = process.env.PIX_API_TOKEN || "";
 const PIX_AUTH_SCHEME = process.env.PIX_AUTH_SCHEME || "Bearer";
 const PIX_TIMEOUT_MS = Number(process.env.PIX_TIMEOUT_MS || 12000);
@@ -769,8 +769,38 @@ function safeTxid(txid) {
 
 function mapPixStatus(value) {
   const raw = String(value || "").toLowerCase();
-  if (["paid", "approved", "success"].includes(raw)) return "PAID";
-  if (["expired", "canceled", "cancelled", "failed"].includes(raw)) return "EXPIRED";
+  const normalized = raw.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  if (
+    [
+      "paid",
+      "approved",
+      "success",
+      "succeeded",
+      "captured",
+      "charge_paid",
+      "order_paid",
+      "payment_paid",
+      "pix_paid",
+    ].includes(normalized)
+  ) {
+    return "PAID";
+  }
+  if (
+    [
+      "expired",
+      "canceled",
+      "cancelled",
+      "failed",
+      "refused",
+      "refunded",
+      "chargeback",
+      "voided",
+      "payment_failed",
+      "pix_expired",
+    ].includes(normalized)
+  ) {
+    return "EXPIRED";
+  }
   return "PENDING";
 }
 
@@ -822,8 +852,9 @@ function isPagarMeConfig(cfg) {
   return detectPixProvider(cfg) === "pagarme";
 }
 
-function buildPixCreatePayload(cfg, amount, customer, clientUser) {
+function buildPixCreatePayload(cfg, amount, customer, clientUser, paymentMethod = "pix", card = {}) {
   const cents = Math.round(amount * 100);
+  const method = String(paymentMethod || "pix").toLowerCase() === "credit_card" ? "credit_card" : "pix";
 
   if (isTriboPayConfig(cfg)) {
     return {
@@ -853,6 +884,43 @@ function buildPixCreatePayload(cfg, amount, customer, clientUser) {
   }
 
   if (isPagarMeConfig(cfg)) {
+    const cardNumber = onlyDigits(card.number || card.card_number || "");
+    const expMonth = String(card.expMonth || card.exp_month || "").replace(/\D/g, "").slice(0, 2);
+    const expYearRaw = String(card.expYear || card.exp_year || "").replace(/\D/g, "");
+    const expYear = expYearRaw.length === 2 ? `20${expYearRaw}` : expYearRaw.slice(0, 4);
+    const cvv = String(card.cvv || card.cvv_code || "").replace(/\D/g, "").slice(0, 4);
+    const holderName = String(card.holderName || card.holder_name || customer.name || clientUser.name || "Cliente").trim();
+
+    const paymentPayload =
+      method === "credit_card"
+        ? {
+            payment_method: "credit_card",
+            credit_card: {
+              installments: 1,
+              statement_descriptor: "BYETRADER",
+              card: {
+                number: cardNumber,
+                holder_name: holderName,
+                exp_month: expMonth,
+                exp_year: expYear,
+                cvv,
+                billing_address: {
+                  line_1: String(clientUser.address || "Endereco nao informado"),
+                  zip_code: "01001000",
+                  city: "Sao Paulo",
+                  state: "SP",
+                  country: "BR",
+                },
+              },
+            },
+          }
+        : {
+            payment_method: "pix",
+            pix: {
+              expires_in: 600,
+            },
+          };
+
     return {
       code: `BYE-${Date.now()}`,
       customer: {
@@ -861,6 +929,13 @@ function buildPixCreatePayload(cfg, amount, customer, clientUser) {
         type: "individual",
         document: onlyDigits(customer.document || clientUser.cpf || "00000000000"),
         document_type: "CPF",
+        phones: {
+          mobile_phone: {
+            country_code: "55",
+            area_code: String(onlyDigits(customer.phone_number || "11999999999")).slice(0, 2) || "11",
+            number: String(onlyDigits(customer.phone_number || "11999999999")).slice(2) || "999999999",
+          },
+        },
       },
       items: [
         {
@@ -871,12 +946,7 @@ function buildPixCreatePayload(cfg, amount, customer, clientUser) {
         },
       ],
       payments: [
-        {
-          payment_method: "pix",
-          pix: {
-            expires_in: 600,
-          },
-        },
+        paymentPayload,
       ],
     };
   }
@@ -1008,6 +1078,8 @@ function normalizeCreateResponse(providerData, requestedAmount, cfg) {
   const source = unwrapProviderData(providerData);
   const sourcePix = unwrapProviderData(source.pix || {});
   const sourcePayment = unwrapProviderData(source.payment || {});
+  const sourceCharge = Array.isArray(source.charges) && source.charges.length ? unwrapProviderData(source.charges[0]) : {};
+  const sourceLastTx = unwrapProviderData(sourceCharge.last_transaction || {});
   const sourceCheckout = unwrapProviderData(source.checkout || {});
   const sourceLinks = unwrapProviderData(source.links || {});
   const tribo = isTriboPayConfig(cfg);
@@ -1018,6 +1090,8 @@ function normalizeCreateResponse(providerData, requestedAmount, cfg) {
     source.code,
     source.transaction_id,
     sourcePayment.id,
+    sourceCharge.id,
+    sourceLastTx.id,
     sourceCheckout.id,
   );
   const triboHash = pickString(source.transaction_hash, source.hash, source.id, source.reference);
@@ -1107,7 +1181,16 @@ function normalizeCreateResponse(providerData, requestedAmount, cfg) {
     cfg.offerHash,
   );
 
-  const status = tribo ? mapPixStatus(source.status) : source.status || "PENDING";
+  const status = mapPixStatus(source.status || source.pixStatus || source.payment_status || "PENDING");
+  const paymentMethod = pickString(
+    source.payment_method,
+    sourcePayment.payment_method,
+    sourceCharge.payment_method,
+    sourceLastTx.payment_method,
+    source.pix ? "pix" : "",
+    source.credit_card ? "credit_card" : "",
+    "pix",
+  );
   const expiresAtRaw =
     source.expiresAt ||
     source.expirationDate ||
@@ -1124,6 +1207,7 @@ function normalizeCreateResponse(providerData, requestedAmount, cfg) {
     txid: String(resolvedTxid),
     amount: Number(requestedAmount),
     status,
+    paymentMethod,
     copyPaste,
     qrCodeBase64,
     paymentUrl:
@@ -1143,9 +1227,79 @@ function normalizeCreateResponse(providerData, requestedAmount, cfg) {
 
 function normalizeStatusResponse(providerData, txid) {
   const source = unwrapProviderData(providerData);
+  const sourceCharge = Array.isArray(source.charges) && source.charges.length ? source.charges[0] : {};
+  const sourceLastTx = sourceCharge?.last_transaction || {};
+  const rawStatus = pickString(
+    source.status,
+    source.pixStatus,
+    source.payment_status,
+    sourceCharge.status,
+    sourceLastTx.status,
+  );
   return {
     txid,
-    status: mapPixStatus(source.status || source.pixStatus || source.payment_status || "PENDING"),
+    status: mapPixStatus(rawStatus || "PENDING"),
+  };
+}
+
+function extractPixWebhookData(body = {}) {
+  const source = unwrapProviderData(body);
+  const sourceData = unwrapProviderData(source.data || {});
+  const sourceCharge = Array.isArray(sourceData.charges) && sourceData.charges.length ? sourceData.charges[0] : {};
+  const sourceLastTx = sourceCharge?.last_transaction || {};
+
+  const txid = pickString(
+    source.transaction_hash,
+    source.txid,
+    source.id,
+    source.resource_id,
+    sourceData.id,
+    sourceData.code,
+    sourceCharge.id,
+    sourceCharge.code,
+    sourceLastTx.id,
+  );
+
+  const rawStatus = pickString(
+    source.status,
+    source.type,
+    source.event,
+    sourceData.status,
+    sourceCharge.status,
+    sourceLastTx.status,
+  );
+
+  const amountCents = Number(
+    source.amount ??
+      sourceData.amount ??
+      sourceCharge.amount ??
+      sourceLastTx.amount ??
+      sourceLastTx.paid_amount ??
+      0,
+  );
+  const amount = Number.isFinite(amountCents) ? amountCents / 100 : 0;
+
+  const paidAt = pickString(
+    source.paid_at,
+    sourceData.closed_at,
+    sourceData.updated_at,
+    sourceCharge.paid_at,
+    sourceCharge.last_transaction?.created_at,
+    sourceLastTx.paid_at,
+  );
+
+  return {
+    txid: String(txid || "").trim(),
+    status: mapPixStatus(rawStatus),
+    amount,
+    paymentMethod: pickString(
+      source.payment_method,
+      sourceData.payment_method,
+      sourceCharge.payment_method,
+      sourceLastTx.payment_method,
+      "pix",
+    ),
+    paidAt: paidAt || null,
   };
 }
 
@@ -2006,6 +2160,7 @@ async function handleApi(req, res, pathname) {
           txid,
           amount: Number(charge.amount || body.amount || 0),
           status: "PAID",
+          paymentMethod: charge.paymentMethod || "pix",
           createdAt: Number(charge.createdAt || now()),
           expiresAt: Number(charge.expiresAt || now()),
           copyPaste: charge.copyPaste || "",
@@ -2688,10 +2843,25 @@ async function handleApi(req, res, pathname) {
     try {
       const body = await readJsonBody(req);
       const amount = Number(body.amount);
+      const paymentMethod = String(body.paymentMethod || "pix").toLowerCase() === "credit_card" ? "credit_card" : "pix";
+      const card = body.card && typeof body.card === "object" ? body.card : {};
 
       if (!Number.isFinite(amount) || amount < MIN_DEPOSIT_AMOUNT || amount > 500000) {
         sendJson(res, 400, { error: `Valor inválido para cobrança Pix. Mínimo: R$ ${formatMoney(MIN_DEPOSIT_AMOUNT).toFixed(2)}.` });
         return;
+      }
+
+      if (paymentMethod === "credit_card") {
+        const cardNumber = onlyDigits(card.number || card.card_number || "");
+        const expMonth = String(card.expMonth || card.exp_month || "").replace(/\D/g, "");
+        const expYear = String(card.expYear || card.exp_year || "").replace(/\D/g, "");
+        const cvv = String(card.cvv || card.cvv_code || "").replace(/\D/g, "");
+        const holderName = String(card.holderName || card.holder_name || "").trim();
+
+        if (cardNumber.length < 13 || cardNumber.length > 19 || expMonth.length < 1 || expYear.length < 2 || cvv.length < 3 || !holderName) {
+          sendJson(res, 400, { error: "Dados de cartão inválidos para pagamento 1x." });
+          return;
+        }
       }
 
       const cfg = getPixConfig();
@@ -2703,6 +2873,7 @@ async function handleApi(req, res, pathname) {
           txid,
           amount: formatMoney(amount),
           status: "PENDING",
+          paymentMethod,
           copyPaste: `00020126580014BR.GOV.BCB.PIX0136${txid}5204000053039865802BR5924BYE TRADER MOCK6009SAO PAULO62070503***6304ABCD`,
           qrCodeBase64:
             "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScxODAnIGhlaWdodD0nMTgwJz48cmVjdCB3aWR0aD0nMTgwJyBoZWlnaHQ9JzE4MCcgZmlsbD0nI2Y2ZjhmYScvPjxyZWN0IHg9JzE2JyB5PScxNicgd2lkdGg9JzQ4JyBoZWlnaHQ9JzQ4JyBmaWxsPScjMDAwJy8+PHJlY3QgeD0nMTE2JyB5PScxNicgd2lkdGg9JzQ4JyBoZWlnaHQ9JzQ4JyBmaWxsPScjMDAwJy8+PHJlY3QgeD0nMTYnIHk9JzExNicgd2lkdGg9JzQ4JyBoZWlnaHQ9JzQ4JyBmaWxsPScjMDAwJy8+PHJlY3QgeD0nODAnIHk9JzgwJyB3aWR0aD0nMTYnIGhlaWdodD0nMTYnIGZpbGw9JyMwMDAnLz48cmVjdCB4PScxMDAnIHk9JzEwMCcgd2lkdGg9JzE2JyBoZWlnaHQ9JzE2JyBmaWxsPScjMDAwJy8+PHRleHQgeD0nOTAnIHk9JzE3MicgZm9udC1mYW1pbHk9J21vbm9zcGFjZScgZm9udC1zaXplPScxMCcgdGV4dC1hbmNob3I9J21pZGRsZScgZmlsbD0nIzExMSc+UElYIE1PQ0s8L3RleHQ+PC9zdmc+",
@@ -2712,7 +2883,7 @@ async function handleApi(req, res, pathname) {
         runtimeChargeStatus.set(normalized.txid, normalized);
       } else {
         const customer = body.customer || {};
-        const payload = buildPixCreatePayload(cfg, amount, customer, clientUser);
+        const payload = buildPixCreatePayload(cfg, amount, customer, clientUser, paymentMethod, card);
 
         const providerData = await callPixProvider(cfg.createPath, "POST", payload);
         normalized = normalizeCreateResponse(providerData, amount, cfg);
@@ -2735,6 +2906,7 @@ async function handleApi(req, res, pathname) {
         txid: normalized.txid,
         amount: Number(normalized.amount || amount),
         status: normalized.status || "PENDING",
+        paymentMethod: normalized.paymentMethod || paymentMethod || "pix",
         createdAt: normalized.createdAt || now(),
         expiresAt: normalized.expiresAt || now() + 10 * 60 * 1000,
         copyPaste: normalized.copyPaste || "",
@@ -2750,7 +2922,7 @@ async function handleApi(req, res, pathname) {
         amount: Number(normalized.amount || amount),
         balanceAfter: formatMoney(db.wallets[clientUser.id]?.available || 0),
         referenceId: normalized.txid,
-        description: "Cobrança Pix criada",
+        description: paymentMethod === "credit_card" ? "Cobrança cartão 1x criada" : "Cobrança Pix criada",
         createdAt: normalized.createdAt || now(),
       });
 
@@ -2821,27 +2993,25 @@ async function handleApi(req, res, pathname) {
   if (pathname === "/api/pix/webhook" && req.method === "POST") {
     try {
       const body = await readJsonBody(req);
-      const txid = String(body.transaction_hash || body.txid || "").trim();
+      const parsed = extractPixWebhookData(body);
+      const txid = parsed.txid;
       if (!txid) {
-        sendJson(res, 400, { error: "transaction_hash ausente." });
+        sendJson(res, 400, { error: "txid/id ausente no webhook." });
         return;
       }
 
-      const status = mapPixStatus(body.status);
-      const amountCents = Number(body.amount || 0);
-      const amount = Number.isFinite(amountCents) ? amountCents / 100 : 0;
       const existing = runtimeChargeStatus.get(txid) || {};
       runtimeChargeStatus.set(txid, {
         ...existing,
         txid,
-        status,
-        amount: existing.amount || amount,
-        paymentMethod: body.payment_method || "pix",
-        paidAt: body.paid_at || null,
+        status: parsed.status,
+        amount: existing.amount || parsed.amount,
+        paymentMethod: parsed.paymentMethod || "pix",
+        paidAt: parsed.paidAt,
         updatedAt: now(),
       });
-      if (status === "PAID") {
-        creditPaidChargeByTxid(txid, amount);
+      if (parsed.status === "PAID") {
+        creditPaidChargeByTxid(txid, parsed.amount);
       }
       markDbDirty();
 
