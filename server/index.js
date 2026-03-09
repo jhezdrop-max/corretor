@@ -1941,15 +1941,25 @@ async function handleApi(req, res, pathname) {
 
     try {
       const body = await readJsonBody(req);
-      const name = String(body.name || "").trim();
-      const email = normalizeEmail(body.email);
-      const cpf = onlyDigits(body.cpf);
-      const pixKey = String(body.pixKey || "").trim();
-      const address = String(body.address || "").trim();
+      const name = body.name === undefined ? String(auth.user.name || "").trim() : String(body.name || "").trim();
+      const email =
+        body.email === undefined ? normalizeEmail(auth.user.email) : normalizeEmail(body.email);
+      const cpf = body.cpf === undefined ? onlyDigits(auth.user.cpf) : onlyDigits(body.cpf);
+      const pixKey =
+        body.pixKey === undefined ? String(auth.user.pixKey || "").trim() : String(body.pixKey || "").trim();
+      const address =
+        body.address === undefined ? String(auth.user.address || "").trim() : String(body.address || "").trim();
 
-      const validationError = validateUserProfileData({ name, email, cpf, pixKey, address });
+      const validationError = validateUserProfileData(
+        { name, email, cpf, pixKey, address },
+        { requireCpf: false, requirePixKey: false, requireAddress: false },
+      );
       if (validationError) {
         sendJson(res, 400, { error: validationError });
+        return;
+      }
+      if (cpf && cpf.length !== 11) {
+        sendJson(res, 400, { error: "CPF inválido. Informe 11 dígitos." });
         return;
       }
 
@@ -2876,6 +2886,17 @@ async function handleApi(req, res, pathname) {
       if (!Number.isFinite(amount) || amount < MIN_DEPOSIT_AMOUNT || amount > 500000) {
         sendJson(res, 400, { error: `Valor inválido para cobrança Pix. Mínimo: R$ ${formatMoney(MIN_DEPOSIT_AMOUNT).toFixed(2)}.` });
         return;
+      }
+
+      if (paymentMethod === "pix") {
+        const cpf = onlyDigits(clientUser.cpf || "");
+        if (cpf.length !== 11) {
+          sendJson(res, 400, {
+            error: "Para gerar depósito Pix, complete seu CPF (11 dígitos) em Conta & Saques.",
+            code: "CPF_REQUIRED_FOR_PIX",
+          });
+          return;
+        }
       }
 
       if (paymentMethod === "credit_card") {
