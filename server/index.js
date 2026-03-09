@@ -33,7 +33,7 @@ const PIX_CREATE_PATH = process.env.PIX_CREATE_PATH || "orders";
 const PIX_STATUS_PATH_TEMPLATE = process.env.PIX_STATUS_PATH_TEMPLATE || "orders/{txid}";
 const PIX_PROVIDER = String(process.env.PIX_PROVIDER || "pagarme").toLowerCase();
 const PIX_API_TOKEN = process.env.PIX_API_TOKEN || "";
-const PIX_AUTH_SCHEME = process.env.PIX_AUTH_SCHEME || "Bearer";
+const PIX_AUTH_SCHEME = process.env.PIX_AUTH_SCHEME || "Basic";
 const PIX_TIMEOUT_MS = Number(process.env.PIX_TIMEOUT_MS || 12000);
 const ADMIN_PANEL_SECRET = process.env.ADMIN_PANEL_SECRET || "";
 const APP_CURRENCY = process.env.APP_CURRENCY || "BRL";
@@ -804,6 +804,33 @@ function mapPixStatus(value) {
   return "PENDING";
 }
 
+function buildPixAuthHeader(cfg) {
+  const scheme = String(cfg?.authScheme || "Bearer").trim();
+  const tokenRaw = String(cfg?.apiToken || "").trim();
+  if (!tokenRaw) return "";
+
+  const token = tokenRaw.replace(/^(Bearer|Basic)\s+/i, "").trim();
+  if (!token) return "";
+
+  const provider = detectPixProvider(cfg);
+  const lowerScheme = scheme.toLowerCase();
+
+  // Pagar.me usa Basic com a API key (secret) como usuário.
+  // Se o painel ficar em Bearer por engano, convertemos automaticamente quando a chave parecer sk_xxx/pk_xxx.
+  if (provider === "pagarme" && lowerScheme !== "basic" && /^(sk|pk)_[a-z0-9]/i.test(token)) {
+    return `Basic ${Buffer.from(`${token}:`).toString("base64")}`;
+  }
+
+  if (lowerScheme !== "basic") {
+    return `${scheme} ${token}`;
+  }
+
+  // Se já vier base64, usa direto; se vier chave textual, codifica.
+  const looksBase64 = /^[A-Za-z0-9+/=]+$/.test(token) && token.length > 20;
+  if (looksBase64) return `Basic ${token}`;
+  return `Basic ${Buffer.from(`${token}:`).toString("base64")}`;
+}
+
 function getPixConfig() {
   const savedPixConfig = db?.settings?.pixConfig || {};
   const cfg = {
@@ -1448,7 +1475,7 @@ async function callPixProvider(pathname, method, body) {
     };
 
     if (!isTriboPayConfig(cfg)) {
-      headers.Authorization = `${cfg.authScheme} ${cfg.apiToken}`;
+      headers.Authorization = buildPixAuthHeader(cfg);
     }
 
     const response = await fetch(url, {
