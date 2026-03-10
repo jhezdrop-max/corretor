@@ -28,12 +28,20 @@ function loadDotEnv() {
 loadDotEnv();
 
 const PORT = Number(process.env.PORT || 5500);
-const PIX_PROVIDER_BASE_URL = process.env.PIX_PROVIDER_BASE_URL || "https://api.pagar.me/core/v5/";
-const PIX_CREATE_PATH = process.env.PIX_CREATE_PATH || "orders";
-const PIX_STATUS_PATH_TEMPLATE = process.env.PIX_STATUS_PATH_TEMPLATE || "orders/{txid}";
-const PIX_PROVIDER = String(process.env.PIX_PROVIDER || "pagarme").toLowerCase();
+const PIX_PROVIDER_BASE_URL =
+  process.env.PIX_PROVIDER_BASE_URL || "https://api.tribopay.com.br/api/public/v1/";
+const PIX_CREATE_PATH = process.env.PIX_CREATE_PATH || "transactions";
+const PIX_STATUS_PATH_TEMPLATE = process.env.PIX_STATUS_PATH_TEMPLATE || "transactions/{txid}";
+const PIX_PROVIDER = String(process.env.PIX_PROVIDER || "tribopay").toLowerCase();
 const PIX_API_TOKEN = process.env.PIX_API_TOKEN || "";
-const PIX_AUTH_SCHEME = process.env.PIX_AUTH_SCHEME || "Basic";
+const PIX_AUTH_SCHEME = process.env.PIX_AUTH_SCHEME || "Bearer";
+const CARD_PROVIDER_BASE_URL = process.env.CARD_PROVIDER_BASE_URL || "https://api.pagar.me/core/v5/";
+const CARD_CREATE_PATH = process.env.CARD_CREATE_PATH || "orders";
+const CARD_STATUS_PATH_TEMPLATE = process.env.CARD_STATUS_PATH_TEMPLATE || "orders/{txid}";
+const CARD_PROVIDER = String(process.env.CARD_PROVIDER || "pagarme").toLowerCase();
+const CARD_API_TOKEN = process.env.CARD_API_TOKEN || PIX_API_TOKEN;
+const CARD_AUTH_SCHEME = process.env.CARD_AUTH_SCHEME || "Basic";
+const DISABLE_PAGARME_PIX = String(process.env.DISABLE_PAGARME_PIX || "1") !== "0";
 const PIX_TIMEOUT_MS = Number(process.env.PIX_TIMEOUT_MS || 12000);
 const ADMIN_PANEL_SECRET = process.env.ADMIN_PANEL_SECRET || "";
 const APP_CURRENCY = process.env.APP_CURRENCY || "BRL";
@@ -527,6 +535,14 @@ function findOwnerByTxid(txid) {
   return "";
 }
 
+function findChargeByTxid(txid) {
+  for (const charges of Object.values(db.pixCharges || {})) {
+    const found = (charges || []).find((item) => item.txid === txid);
+    if (found) return found;
+  }
+  return null;
+}
+
 function ensureDbCharge(ownerId, txid, amountHint = 0) {
   if (!db.pixCharges[ownerId]) db.pixCharges[ownerId] = [];
   let charge = db.pixCharges[ownerId].find((item) => item.txid === txid);
@@ -536,6 +552,7 @@ function ensureDbCharge(ownerId, txid, amountHint = 0) {
       txid,
       amount: Number(runtime.amount || amountHint || 0),
       status: String(runtime.status || "PENDING"),
+      paymentMethod: String(runtime.paymentMethod || "pix"),
       createdAt: Number(runtime.createdAt || now()),
       expiresAt: Number(runtime.expiresAt || now() + 10 * 60 * 1000),
       copyPaste: runtime.copyPaste || "",
@@ -859,6 +876,29 @@ function getPixConfig() {
       "",
   };
   return cfg;
+}
+
+function getCardConfig() {
+  return {
+    provider: CARD_PROVIDER || "pagarme",
+    baseUrl: CARD_PROVIDER_BASE_URL,
+    createPath: CARD_CREATE_PATH,
+    statusPathTemplate: CARD_STATUS_PATH_TEMPLATE,
+    apiToken: CARD_API_TOKEN,
+    authScheme: CARD_AUTH_SCHEME,
+    offerHash: "",
+    productHash: "",
+    productTitle: "Deposito Bye Trader",
+    productCover: "",
+    productSalePage: "",
+  };
+}
+
+function getPaymentConfig(paymentMethod = "pix") {
+  if (String(paymentMethod || "").toLowerCase() === "credit_card") {
+    return getCardConfig();
+  }
+  return getPixConfig();
 }
 
 function detectPixProvider(cfg) {
@@ -2912,7 +2952,14 @@ async function handleApi(req, res, pathname) {
         }
       }
 
-      const cfg = getPixConfig();
+      const cfg = getPaymentConfig(paymentMethod);
+      if (paymentMethod === "pix" && DISABLE_PAGARME_PIX && isPagarMeConfig(cfg)) {
+        sendJson(res, 400, {
+          error:
+            "Pix via Pagar.me está desativado. Configure o provedor Pix como TriboPay no painel admin.",
+        });
+        return;
+      }
       let normalized;
 
       if (!cfg.baseUrl || !cfg.apiToken) {
@@ -3011,7 +3058,9 @@ async function handleApi(req, res, pathname) {
         return;
       }
 
-      const cfg = getPixConfig();
+      const chargeInDb = findChargeByTxid(txid);
+      const method = String(chargeInDb?.paymentMethod || cached?.paymentMethod || "pix").toLowerCase();
+      const cfg = getPaymentConfig(method);
       if (!cfg.statusPathTemplate || !cfg.baseUrl || !cfg.apiToken) {
         if (cached?.status !== "PAID" && cached?.createdAt && now() - cached.createdAt > 7000) {
           runtimeChargeStatus.set(txid, { ...cached, status: "PAID" });
