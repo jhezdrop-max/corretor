@@ -1501,8 +1501,9 @@ async function callPixProvider(pathname, method, body) {
   }
 
   const url = new URL(pathname, cfg.baseUrl);
-  if (isTriboPayConfig(cfg) && cfg.apiToken) {
-    url.searchParams.set("api_token", cfg.apiToken);
+  const tokenClean = String(cfg.apiToken || "").replace(/^(Bearer|Basic)\s+/i, "").trim();
+  if (isTriboPayConfig(cfg) && tokenClean) {
+    url.searchParams.set("api_token", tokenClean);
   }
 
   const controller = new AbortController();
@@ -1514,7 +1515,9 @@ async function callPixProvider(pathname, method, body) {
       Accept: "application/json",
     };
 
-    if (!isTriboPayConfig(cfg)) {
+    if (isTriboPayConfig(cfg) && tokenClean) {
+      headers.Authorization = `Bearer ${tokenClean}`;
+    } else if (!isTriboPayConfig(cfg)) {
       headers.Authorization = buildPixAuthHeader(cfg);
     }
 
