@@ -902,12 +902,12 @@ function getPaymentConfig(paymentMethod = "pix") {
 }
 
 function detectPixProvider(cfg) {
-  const explicit = String(cfg?.provider || "").toLowerCase().trim();
-  if (["tribopay", "pagarme", "generic"].includes(explicit)) return explicit;
-
   const baseUrl = String(cfg?.baseUrl || "").toLowerCase();
   if (baseUrl.includes("tribopay.com.br")) return "tribopay";
   if (baseUrl.includes("pagar.me")) return "pagarme";
+
+  const explicit = String(cfg?.provider || "").toLowerCase().trim();
+  if (["tribopay", "pagarme", "generic"].includes(explicit)) return explicit;
   return "generic";
 }
 
