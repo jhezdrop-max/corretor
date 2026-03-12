@@ -35,6 +35,7 @@ const PIX_STATUS_PATH_TEMPLATE = process.env.PIX_STATUS_PATH_TEMPLATE || "transa
 const PIX_PROVIDER = String(process.env.PIX_PROVIDER || "tribopay").toLowerCase();
 const PIX_API_TOKEN = process.env.PIX_API_TOKEN || "";
 const PIX_AUTH_SCHEME = process.env.PIX_AUTH_SCHEME || "Bearer";
+const PIX_SEND_AUTH_HEADER = String(process.env.PIX_SEND_AUTH_HEADER || "0") === "1";
 const CARD_PROVIDER_BASE_URL = process.env.CARD_PROVIDER_BASE_URL || "https://api.pagar.me/core/v5/";
 const CARD_CREATE_PATH = process.env.CARD_CREATE_PATH || "orders";
 const CARD_STATUS_PATH_TEMPLATE = process.env.CARD_STATUS_PATH_TEMPLATE || "orders/{txid}";
@@ -1515,7 +1516,7 @@ async function callPixProvider(pathname, method, body) {
       Accept: "application/json",
     };
 
-    if (isTriboPayConfig(cfg) && tokenClean) {
+    if (isTriboPayConfig(cfg) && tokenClean && PIX_SEND_AUTH_HEADER) {
       headers.Authorization = `Bearer ${tokenClean}`;
     } else if (!isTriboPayConfig(cfg)) {
       headers.Authorization = buildPixAuthHeader(cfg);
